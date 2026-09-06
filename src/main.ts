@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import './style.css';
+import { SoundBank } from './sound';
+import { drawVectorTitle } from './vector-title';
 import {
   CARGO_VALUES,
   CargoDrop,
@@ -331,11 +333,15 @@ app.innerHTML = `
     <div id="damageLayer" class="damage-layer" aria-hidden="true"></div>
     <div id="launchOverlay" class="launch-overlay">
       <div class="briefing">
-        <section class="briefing-hero">
-          <div>
-            <p id="briefingStatus" class="briefing-status">PILOT BRIEFING</p>
-            <h1 id="launchTitle">VECTOR SHOOTER</h1>
+        <header class="arcade-header">
+          <div class="arcade-scores">
+            <span>1UP <strong id="arcadeScore">000000</strong></span>
+            <span>HI SCORE <strong id="arcadeBest">000000</strong></span>
           </div>
+          <h1 id="launchTitle" class="screen-reader-only">VECTOR SHOOTER</h1>
+          <canvas id="vectorTitle" class="vector-title" aria-hidden="true"></canvas>
+          <p id="briefingStatus" class="briefing-status">PILOT BRIEFING</p>
+        </header>
           <div class="mission-briefing" aria-label="Mission briefing">
             <p class="briefing-status">MISSION BRIEFING</p>
             <h2 id="missionBriefTitle">BOUNTY: RED RAIDER ACE</h2>
@@ -343,12 +349,6 @@ app.innerHTML = `
             <p id="missionBriefCaution">Pirates are lawful targets. Do not shoot police or peaceful traders.</p>
             <p id="missionBriefReward">REWARD CR 460</p>
           </div>
-          <button id="launchButton" type="button">PLAY GAME</button>
-          <div id="deathCountdown" class="death-countdown hidden">
-            <span>RETURNING TO START SCREEN IN</span>
-            <strong id="deathTimer">10</strong>
-          </div>
-        </section>
         <section class="controls-card" aria-label="Controls">
           <h2>CONTROLS</h2>
           <dl class="control-grid">
@@ -363,16 +363,23 @@ app.innerHTML = `
           </dl>
         </section>
         <section class="model-card" aria-label="Game objects">
+          <div class="model-kicker">
+            <p class="briefing-status">OBJECT SCAN</p>
+            <p id="modelCount" class="model-count">1/1</p>
+          </div>
           <div id="modelPreview" class="model-preview"></div>
           <div class="model-copy">
-            <div class="model-kicker">
-              <p class="briefing-status">OBJECT SCAN</p>
-              <p id="modelCount" class="model-count">1/1</p>
-            </div>
             <h2 id="modelTitle">RED PIRATE</h2>
             <p id="modelDescription">Bad guys carrying stolen goods. They will shoot you.</p>
           </div>
         </section>
+        <footer class="start-actions">
+          <div id="deathCountdown" class="death-countdown hidden">
+            <span>RETURN TO TITLE IN</span>
+            <strong id="deathTimer">10</strong>
+          </div>
+          <button id="launchButton" type="button">PLAY GAME</button>
+        </footer>
       </div>
     </div>
   </main>
@@ -382,6 +389,9 @@ const viewport = document.querySelector<HTMLDivElement>('#viewport')!;
 const launchOverlay = document.querySelector<HTMLDivElement>('#launchOverlay')!;
 const gameShell = document.querySelector<HTMLElement>('.game-shell')!;
 const launchTitle = document.querySelector<HTMLHeadingElement>('#launchTitle')!;
+const vectorTitle = document.querySelector<HTMLCanvasElement>('#vectorTitle')!;
+const arcadeScore = document.querySelector<HTMLElement>('#arcadeScore')!;
+const arcadeBest = document.querySelector<HTMLElement>('#arcadeBest')!;
 const briefingStatus = document.querySelector<HTMLParagraphElement>('#briefingStatus')!;
 const launchButton = document.querySelector<HTMLButtonElement>('#launchButton')!;
 const deathCountdown = document.querySelector<HTMLDivElement>('#deathCountdown')!;
@@ -437,66 +447,6 @@ class SeededRandom {
   }
 }
 
-class SoundBank {
-  private context: AudioContext | null = null;
-
-  async start(): Promise<void> {
-    if (!this.context) {
-      this.context = new AudioContext();
-    }
-    if (this.context.state !== 'running') {
-      await this.context.resume();
-    }
-  }
-
-  shoot(): void {
-    this.tone(580, 0.055, 'square', 0.045, 110);
-  }
-
-  enemyShoot(): void {
-    this.tone(270, 0.07, 'sawtooth', 0.03, -80);
-  }
-
-  pickup(): void {
-    this.tone(760, 0.09, 'triangle', 0.05, 240);
-  }
-
-  explosion(): void {
-    this.tone(90, 0.18, 'sawtooth', 0.08, -40);
-  }
-
-  warning(): void {
-    this.tone(140, 0.16, 'square', 0.07, 0);
-  }
-
-  damage(): void {
-    this.tone(82, 0.22, 'sawtooth', 0.09, -28);
-    this.tone(620, 0.11, 'square', 0.05, -260);
-  }
-
-  warp(): void {
-    this.tone(180, 0.65, 'sawtooth', 0.08, 640);
-  }
-
-  private tone(frequency: number, duration: number, type: OscillatorType, gainValue: number, sweep: number): void {
-    if (!this.context || this.context.state !== 'running') {
-      return;
-    }
-
-    const now = this.context.currentTime;
-    const oscillator = this.context.createOscillator();
-    const gain = this.context.createGain();
-    oscillator.type = type;
-    oscillator.frequency.setValueAtTime(frequency, now);
-    oscillator.frequency.linearRampToValueAtTime(Math.max(20, frequency + sweep), now + duration);
-    gain.gain.setValueAtTime(gainValue, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-    oscillator.connect(gain).connect(this.context.destination);
-    oscillator.start(now);
-    oscillator.stop(now + duration);
-  }
-}
-
 function hashString(value: string): number {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -547,189 +497,67 @@ function edgesFromGeometry(geometry: THREE.BufferGeometry, color: number, opacit
 
 function createPirateModel(): THREE.Group {
   const group = new THREE.Group();
-  group.add(
-    lineShape(
-      [
-        [0, 0, -7],
-        [-3.8, -0.35, 2.5],
-        [3.8, -0.35, 2.5],
-        [0, 1.6, 0.8],
-        [0, -1.2, 2.2],
-        [-5.3, 0.05, 0.2],
-        [5.3, 0.05, 0.2],
-        [0, 0.05, 4.6]
-      ],
-      [
-        [0, 1],
-        [0, 2],
-        [0, 3],
-        [0, 4],
-        [1, 3],
-        [2, 3],
-        [1, 4],
-        [2, 4],
-        [1, 7],
-        [2, 7],
-        [4, 7],
-        [5, 1],
-        [6, 2],
-        [5, 7],
-        [6, 7],
-        [5, 0],
-        [6, 0]
-      ],
-      COLORS.pirate
-    )
-  );
-  const engine = edgesFromGeometry(new THREE.BoxGeometry(2.4, 0.8, 1.4), 0xff7a8a, 0.7);
-  engine.position.z = 4.5;
-  group.add(engine);
+  group.add(lineShape(
+    [[0, 0, -7], [-6, -1, 4], [6, -1, 4], [0, 2.4, 2]],
+    [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]],
+    COLORS.pirate
+  ));
   return group;
 }
 
 function createTraderHaulerModel(): THREE.Group {
   const group = new THREE.Group();
-  const body = edgesFromGeometry(new THREE.BoxGeometry(5.8, 2.4, 8), COLORS.trader);
-  group.add(body);
-
-  const leftPod = edgesFromGeometry(new THREE.BoxGeometry(1.2, 1.2, 6.5), COLORS.trader, 0.72);
-  leftPod.position.x = -4;
-  group.add(leftPod);
-
-  const rightPod = leftPod.clone();
-  rightPod.position.x = 4;
-  group.add(rightPod);
-
-  const nose = edgesFromGeometry(new THREE.ConeGeometry(2.7, 3.4, 4), 0xa2ffd4, 0.8);
-  nose.rotation.x = Math.PI / 2;
-  nose.position.z = -5.6;
-  group.add(nose);
+  group.add(lineShape(
+    [[-2, -1.5, -6], [2, -1.5, -6], [2, 1.5, -6], [-2, 1.5, -6],
+      [-4.5, -2, 5], [4.5, -2, 5], [4.5, 2, 5], [-4.5, 2, 5]],
+    [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4],
+      [0, 4], [1, 5], [2, 6], [3, 7]],
+    COLORS.trader
+  ));
   return group;
 }
 
 function createTraderUfoModel(): THREE.Group {
   const group = new THREE.Group();
-  const saucer = edgesFromGeometry(new THREE.CylinderGeometry(5.2, 5.8, 1, 10, 1), COLORS.trader);
-  saucer.rotation.x = Math.PI / 2;
-  group.add(saucer);
-
-  const dome = edgesFromGeometry(new THREE.OctahedronGeometry(2.1, 0), 0xc7ffdf, 0.8);
-  dome.position.y = 0.9;
-  group.add(dome);
-
-  const keel = edgesFromGeometry(new THREE.BoxGeometry(1.2, 2.2, 2), COLORS.trader, 0.72);
-  keel.position.y = -1.1;
-  group.add(keel);
+  group.add(lineShape(
+    [[-6, 0, 0], [-3, 0, -5], [3, 0, -5], [6, 0, 0], [3, 0, 5], [-3, 0, 5],
+      [0, 2.5, 0], [0, -1.6, 0]],
+    [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 0],
+      [0, 6], [2, 6], [4, 6], [1, 7], [3, 7], [5, 7]],
+    COLORS.trader
+  ));
   return group;
 }
 
 function createPoliceModel(): THREE.Group {
   const group = new THREE.Group();
-  group.add(
-    lineShape(
-      [
-        [0, 0, -7.2],
-        [-2.6, 0, 3.5],
-        [2.6, 0, 3.5],
-        [0, 1.2, 1.4],
-        [0, -1.2, 1.4],
-        [-1.2, 0.55, -1.2],
-        [1.2, 0.55, -1.2],
-        [-4.2, 0, 1.6],
-        [4.2, 0, 1.6]
-      ],
-      [
-        [0, 1],
-        [0, 2],
-        [0, 3],
-        [0, 4],
-        [1, 3],
-        [2, 3],
-        [1, 4],
-        [2, 4],
-        [5, 7],
-        [5, 0],
-        [6, 8],
-        [6, 0],
-        [7, 1],
-        [8, 2]
-      ],
-      COLORS.police
-    )
-  );
-  const lightBar = edgesFromGeometry(new THREE.BoxGeometry(2.3, 0.4, 0.7), COLORS.policeAccent, 0.88);
-  lightBar.position.y = 1.15;
-  lightBar.position.z = 0.6;
-  group.add(lightBar);
+  group.add(lineShape(
+    [[0, 0, -7], [-4, 0, 0], [0, 0, 6], [4, 0, 0], [0, 2.8, 0], [0, -1.5, 0]],
+    [[0, 1], [1, 2], [2, 3], [3, 0], [0, 4], [1, 4], [2, 4], [3, 4],
+      [0, 5], [1, 5], [2, 5], [3, 5]],
+    COLORS.police
+  ));
+  group.add(lineShape([[-1.2, 2.8, 0], [1.2, 2.8, 0]], [[0, 1]], COLORS.policeAccent));
   return group;
 }
 
 function createCargoModel(type: CargoType): THREE.Group {
   const group = new THREE.Group();
-  const addPickupHalo = (color: number): void => {
-    const halo = edgesFromGeometry(new THREE.TorusGeometry(5.2, 0.22, 4, 10), color, 0.92);
-    halo.rotation.x = Math.PI / 2;
-    group.add(halo);
-    const bracket = lineShape(
-      [
-        [-6.4, 0, 0],
-        [-4.6, 0, 0],
-        [4.6, 0, 0],
-        [6.4, 0, 0],
-        [0, -6.4, 0],
-        [0, -4.6, 0],
-        [0, 4.6, 0],
-        [0, 6.4, 0]
-      ],
-      [
-        [0, 1],
-        [2, 3],
-        [4, 5],
-        [6, 7]
-      ],
-      color,
-      0.8
-    );
-    group.add(bracket);
-  };
-
+  const color = type === 'contraband' ? COLORS.contraband : type === 'rareMineral' ? COLORS.mineral
+    : type === 'weaponCore' ? 0xff6b25 : type === 'shieldCell' ? 0x7edcff
+      : type === 'rescuePod' ? 0xffffff : COLORS.cargo;
   if (type === 'rareMineral') {
     group.add(edgesFromGeometry(new THREE.OctahedronGeometry(2.7, 0), COLORS.mineral));
-    addPickupHalo(COLORS.mineral);
-    return group;
+  } else if (type === 'contraband' || type === 'weaponCore') {
+    group.add(edgesFromGeometry(new THREE.TetrahedronGeometry(3, 0), color));
+  } else if (type === 'shieldCell' || type === 'credits') {
+    group.add(createPulseRing(color, 2.7, 0, 0.95, 8));
+    group.add(lineShape([[-1.3, 0, 0], [1.3, 0, 0], [0, -1.3, 0], [0, 1.3, 0]],
+      type === 'shieldCell' ? [[0, 1], [2, 3]] : [[2, 3]], color));
+  } else {
+    group.add(edgesFromGeometry(new THREE.BoxGeometry(3, type === 'rescuePod' ? 5 : 3, 3), color));
   }
-
-  if (type === 'contraband') {
-    group.add(edgesFromGeometry(new THREE.DodecahedronGeometry(2.7, 0), COLORS.contraband));
-    addPickupHalo(COLORS.contraband);
-    return group;
-  }
-
-  if (type === 'rescuePod') {
-    group.add(edgesFromGeometry(new THREE.CapsuleGeometry(1.5, 2.5, 4, 8), 0xffffff));
-    addPickupHalo(0xffffff);
-    return group;
-  }
-
-  const color = type === 'weaponCore' ? 0xff6b25 : type === 'shieldCell' ? 0x7edcff : COLORS.cargo;
-  const crate = edgesFromGeometry(new THREE.BoxGeometry(3.6, 3.6, 3.6), color);
-  group.add(crate);
-  const diagonal = lineShape(
-    [
-      [-1.8, -1.8, -1.8],
-      [1.8, 1.8, 1.8],
-      [-1.8, 1.8, 1.8],
-      [1.8, -1.8, -1.8]
-    ],
-    [
-      [0, 1],
-      [2, 3]
-    ],
-    color,
-    0.58
-  );
-  group.add(diagonal);
-  addPickupHalo(color);
+  group.add(lineShape([[0, 5.5, 0], [-5, -3.8, 0], [5, -3.8, 0]], [[0, 1], [1, 2], [2, 0]], color, 0.55));
   return group;
 }
 
@@ -754,7 +582,7 @@ function createTextSprite(
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.shadowColor = color;
-  context.shadowBlur = 18;
+  context.shadowBlur = 0;
   context.fillStyle = color;
   context.fillText(text, canvas.width / 2, canvas.height / 2);
 
@@ -813,46 +641,13 @@ function createGateModel(): THREE.Group {
   const group = new THREE.Group();
   const rotor = new THREE.Group();
 
-  const mouth = edgesFromGeometry(new THREE.TorusGeometry(36, 1.1, 4, 20), COLORS.gate, 0.92);
-  rotor.add(mouth);
-  const innerGuide = edgesFromGeometry(new THREE.TorusGeometry(GATE_RADIUS, 0.46, 4, 18), 0xc5f1ff, 0.52);
-  rotor.add(innerGuide);
-
-  for (let index = 0; index < 4; index += 1) {
-    const tunnelRing = edgesFromGeometry(new THREE.TorusGeometry(34 - index * 3.8, 0.42, 4, 18), 0x9de2ff, 0.36 - index * 0.05);
-    tunnelRing.position.z = -10 - index * 11;
-    rotor.add(tunnelRing);
-  }
-
-  for (let index = 0; index < 16; index += 1) {
-    const block = edgesFromGeometry(new THREE.BoxGeometry(4.2, 4.2, 3.1), 0x9de2ff, 0.78);
-    const angle = (index / 16) * Math.PI * 2;
-    block.position.set(Math.cos(angle) * 38, Math.sin(angle) * 38, index % 2 === 0 ? 4 : -4);
-    block.rotation.z = angle;
-    rotor.add(block);
-  }
-
+  rotor.add(createPulseRing(COLORS.gate, 36, 0, 0.95, 8));
+  rotor.add(createPulseRing(COLORS.gate, 36, -24, 0.5, 8));
   for (let index = 0; index < 8; index += 1) {
-    const brace = lineShape(
-      [
-        [0, -4.4, -7],
-        [0, 4.4, -7],
-        [0, -3.1, 7],
-        [0, 3.1, 7]
-      ],
-      [
-        [0, 1],
-        [2, 3],
-        [0, 2],
-        [1, 3]
-      ],
-      0xc5f1ff,
-      0.5
-    );
     const angle = (index / 8) * Math.PI * 2;
-    brace.position.set(Math.cos(angle) * 32, Math.sin(angle) * 32, -17);
-    brace.rotation.z = angle;
-    rotor.add(brace);
+    const x = Math.cos(angle) * 36;
+    const y = Math.sin(angle) * 36;
+    rotor.add(lineShape([[x, y, 0], [x, y, -24]], [[0, 1]], COLORS.gate, 0.6));
   }
 
   const arrow = lineShape(
@@ -872,9 +667,7 @@ function createGateModel(): THREE.Group {
       [3, 4],
       [4, 5],
       [5, 6],
-      [6, 0],
-      [0, 3],
-      [0, 4]
+      [6, 0]
     ],
     WARP_CUE_COLOR,
     1
@@ -882,8 +675,8 @@ function createGateModel(): THREE.Group {
   group.add(rotor);
   group.add(arrow);
 
-  const warpText = createTextSprite('WARP', '#ffffff', 'rgba(16, 8, 0, 0.32)', 44, 14);
-  warpText.position.set(0, 43, 13);
+  const warpText = createTextSprite('WARP', '#ffffff', 'rgba(0, 0, 0, 0)', 44, 14);
+  warpText.position.set(0, 54, 13);
   warpText.userData.baseScale = warpText.scale.clone();
   group.add(warpText);
   group.userData.rotor = rotor;
@@ -895,59 +688,41 @@ function createGateModel(): THREE.Group {
 
 function createBaseModel(): THREE.Group {
   const group = new THREE.Group();
-  group.add(edgesFromGeometry(new THREE.OctahedronGeometry(26, 1), COLORS.base, 0.62));
-  const ring = edgesFromGeometry(new THREE.TorusGeometry(36, 0.9, 4, 22), COLORS.base, 0.5);
-  ring.rotation.x = Math.PI / 2;
-  group.add(ring);
-  const safeRing = edgesFromGeometry(new THREE.TorusGeometry(SAFE_TRADE_RADIUS, 0.45, 4, 42), 0xffd15c, 0.34);
+  group.add(edgesFromGeometry(new THREE.BoxGeometry(38, 30, 38), COLORS.base));
+  group.add(lineShape(
+    [[-9, -10, 19], [-9, 8, 19], [9, 8, 19], [9, -10, 19],
+      [0, 15, 0], [0, 36, 0], [-7, 30, 0], [7, 30, 0]],
+    [[0, 1], [1, 2], [2, 3], [4, 5], [6, 7]], COLORS.base
+  ));
+  const safeRing = createPulseRing(0xffd15c, SAFE_TRADE_RADIUS, 0, 0.25, 24);
   safeRing.rotation.x = Math.PI / 2;
   group.add(safeRing);
-  const mast = edgesFromGeometry(new THREE.BoxGeometry(5, 32, 5), 0xa7ffe7, 0.62);
-  group.add(mast);
-  const dockArm = edgesFromGeometry(new THREE.BoxGeometry(74, 2.2, 2.2), 0xa7ffe7, 0.38);
-  group.add(dockArm);
-  const crossArm = edgesFromGeometry(new THREE.BoxGeometry(2.2, 2.2, 74), 0xa7ffe7, 0.38);
-  group.add(crossArm);
   return group;
 }
 
 function createPlanetModel(color: number): THREE.Group {
   const group = new THREE.Group();
-  const surface = new THREE.Mesh(
-    new THREE.SphereGeometry(52, 24, 16),
-    new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.055,
-      depthWrite: false
-    })
-  );
-  group.add(surface);
-  const sphere = edgesFromGeometry(new THREE.SphereGeometry(52, 14, 10), color, 0.26);
-  group.add(sphere);
-  const horizon = edgesFromGeometry(new THREE.TorusGeometry(56, 0.7, 4, 36), 0xeafff8, 0.38);
-  horizon.rotation.y = Math.PI / 2;
-  group.add(horizon);
-  const band = edgesFromGeometry(new THREE.TorusGeometry(72, 0.8, 4, 32), color, 0.42);
+  group.add(createPulseRing(color, 55, 0, 0.8, 32));
+  const meridian = createPulseRing(color, 55, 0, 0.45, 32);
+  meridian.rotation.y = Math.PI / 2;
+  group.add(meridian);
+  const equator = createPulseRing(color, 55, 0, 0.45, 32);
+  equator.rotation.x = Math.PI / 2;
+  group.add(equator);
+  const band = createPulseRing(color, 78, 0, 0.75, 32);
   band.rotation.x = Math.PI / 2.8;
   group.add(band);
-  const gravityRing = edgesFromGeometry(new THREE.TorusGeometry(SAFE_TRADE_RADIUS, 0.38, 4, 46), 0xffd15c, 0.25);
-  gravityRing.rotation.x = Math.PI / 2;
-  group.add(gravityRing);
   return group;
 }
 
 function createBlackMarketModel(): THREE.Group {
   const group = new THREE.Group();
-  group.add(edgesFromGeometry(new THREE.DodecahedronGeometry(16, 0), COLORS.contraband, 0.52));
-  const mast = edgesFromGeometry(new THREE.BoxGeometry(3.4, 32, 3.4), COLORS.contraband, 0.42);
-  group.add(mast);
-  const exchangeRing = edgesFromGeometry(new THREE.TorusGeometry(BLACK_MARKET_RADIUS, 0.42, 4, 34), COLORS.contraband, 0.28);
+  group.add(edgesFromGeometry(new THREE.OctahedronGeometry(18, 0), COLORS.contraband));
+  group.add(lineShape([[0, -30, 0], [0, 30, 0], [-8, 26, 0], [8, 26, 0]],
+    [[0, 1], [2, 3]], COLORS.contraband));
+  const exchangeRing = createPulseRing(COLORS.contraband, BLACK_MARKET_RADIUS, 0, 0.25, 16);
   exchangeRing.rotation.x = Math.PI / 2;
   group.add(exchangeRing);
-  const dockArm = edgesFromGeometry(new THREE.BoxGeometry(48, 1.8, 1.8), COLORS.contraband, 0.34);
-  dockArm.rotation.z = Math.PI / 4;
-  group.add(dockArm);
   return group;
 }
 
@@ -955,7 +730,7 @@ function createBeaconModel(color: number): THREE.Group {
   const group = new THREE.Group();
   const gem = edgesFromGeometry(new THREE.OctahedronGeometry(5, 0), color, 0.82);
   group.add(gem);
-  const halo = edgesFromGeometry(new THREE.TorusGeometry(8, 0.4, 4, 12), color, 0.48);
+  const halo = createPulseRing(color, 8, 0, 0.48, 8);
   group.add(halo);
   return group;
 }
@@ -975,34 +750,6 @@ function createProjectileModel(color: number): THREE.LineSegments {
     tunePulseMaterial(material, 0.96);
   }
   return line;
-}
-
-let pulseTexture: THREE.CanvasTexture | null = null;
-
-function createPulseTexture(): THREE.CanvasTexture {
-  if (pulseTexture) {
-    return pulseTexture;
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = 64;
-  canvas.height = 64;
-  const context = canvas.getContext('2d');
-  if (!context) {
-    throw new Error('Canvas pulse context unavailable');
-  }
-
-  const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 31);
-  gradient.addColorStop(0, 'rgba(255, 255, 255, 0.82)');
-  gradient.addColorStop(0.28, 'rgba(255, 255, 255, 0.28)');
-  gradient.addColorStop(0.58, 'rgba(255, 255, 255, 0.1)');
-  gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, 64, 64);
-
-  pulseTexture = new THREE.CanvasTexture(canvas);
-  pulseTexture.colorSpace = THREE.SRGBColorSpace;
-  return pulseTexture;
 }
 
 function tunePulseMaterial(material: THREE.Material, baseOpacity: number): void {
@@ -1075,21 +822,10 @@ function createStarTexture(): THREE.CanvasTexture {
     throw new Error('Canvas star context unavailable');
   }
 
-  const gradient = context.createRadialGradient(16, 16, 0, 16, 16, 15);
-  gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-  gradient.addColorStop(0.26, 'rgba(210, 255, 238, 0.82)');
-  gradient.addColorStop(0.72, 'rgba(90, 255, 200, 0.18)');
-  gradient.addColorStop(1, 'rgba(90, 255, 200, 0)');
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, 32, 32);
-  context.strokeStyle = 'rgba(255, 255, 255, 0.72)';
-  context.lineWidth = 1.1;
+  context.fillStyle = '#ffffff';
   context.beginPath();
-  context.moveTo(16, 7);
-  context.lineTo(16, 25);
-  context.moveTo(7, 16);
-  context.lineTo(25, 16);
-  context.stroke();
+  context.arc(16, 16, 5, 0, Math.PI * 2);
+  context.fill();
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -1098,41 +834,19 @@ function createStarTexture(): THREE.CanvasTexture {
 
 function createBoltModel(color: number, radius: number, length: number, faction: Faction): THREE.Group {
   const group = new THREE.Group();
-  const nose = -length * 0.54;
-  const tail = length * 0.62;
-  const ringRadius = Math.max(4.6, radius * 1.08);
-  const coreRadius = Math.max(2.4, radius * 0.48);
-  const lineOpacity = faction === 'player' ? 0.72 : 0.54;
-  const haloOpacity = faction === 'player' ? 0.34 : 0.24;
-
-  group.add(createPulseRing(color, ringRadius, -length * 0.1, lineOpacity, 32));
-  group.add(createPulseRing(0xffffff, coreRadius, -length * 0.1, faction === 'player' ? 0.36 : 0.24, 24));
-  group.add(createPulseRing(color, ringRadius * 0.62, tail * 0.32, haloOpacity, 24));
-  group.add(createGlowLine([[0, 0, nose], [0, 0, tail]], [[0, 1]], color, lineOpacity));
-  group.add(createGlowLine([[0, 0, nose * 0.62], [0, 0, tail * 0.42]], [[0, 1]], 0xffffff, faction === 'player' ? 0.3 : 0.2));
-
-  const glowGeometry = new THREE.BufferGeometry();
-  glowGeometry.setAttribute(
-    'position',
-    new THREE.Float32BufferAttribute([0, 0, -length * 0.12, 0, 0, tail * 0.28, 0, 0, tail * 0.56], 3)
-  );
-  const glowOpacity = faction === 'player' ? 0.36 : 0.28;
-  const glowMaterial = new THREE.PointsMaterial({
-    color,
-    size: faction === 'player' ? radius * 2.9 : radius * 2.35,
-    map: createPulseTexture(),
-    transparent: true,
-    opacity: glowOpacity,
-    alphaTest: 0.02,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false
-  });
-  glowMaterial.userData.baseOpacity = glowOpacity;
-  const glow = new THREE.Points(
-    glowGeometry,
-    glowMaterial
-  );
-  group.add(glow);
+  const ringRadius = Math.max(4.2, radius);
+  const opacity = faction === 'player' ? 0.9 : 0.8;
+  group.add(createPulseRing(color, ringRadius, 0, opacity, 12));
+  group.add(createPulseRing(color, ringRadius * 0.65, length * 0.22, 0.35, 12));
+  for (let index = 0; index < 4; index += 1) {
+    const angle = index * Math.PI / 2;
+    group.add(createGlowLine(
+      [[Math.cos(angle) * ringRadius * 1.18, Math.sin(angle) * ringRadius * 1.18, 0],
+        [Math.cos(angle) * ringRadius * 1.5, Math.sin(angle) * ringRadius * 1.5, 0]],
+      [[0, 1]], color, opacity
+    ));
+  }
+  group.add(createGlowLine([[ringRadius, 0, -length * 0.3], [ringRadius, 0, length * 0.3]], [[0, 1]], color, 0.45));
   return group;
 }
 
@@ -1278,7 +992,7 @@ class VectorShooterGame {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setClearColor(0x010304, 1);
+    this.renderer.setClearColor(0x000000, 1);
     viewport.appendChild(this.renderer.domElement);
 
     this.briefingPreviewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -1413,6 +1127,11 @@ class VectorShooterGame {
     this.briefingPreviewCamera.aspect = previewWidth / previewHeight;
     this.briefingPreviewCamera.updateProjectionMatrix();
     this.briefingPreviewRenderer.setSize(previewWidth, previewHeight, false);
+    this.drawScreenTitle();
+  }
+
+  private drawScreenTitle(): void {
+    drawVectorTitle(vectorTitle, launchTitle.textContent ?? '', launchOverlay.dataset.mode === 'death' ? '#ff5050' : '#ffff70');
   }
 
   private update(delta: number): void {
@@ -1464,9 +1183,7 @@ class VectorShooterGame {
     }
 
     if (this.briefingObject) {
-      this.briefingObject.rotation.x += delta * 0.16;
-      this.briefingObject.rotation.y += delta * 0.72;
-      this.briefingObject.rotation.z += delta * 0.05;
+      this.briefingObject.rotation.y += delta * 0.55;
     }
     this.briefingPreviewRenderer.render(this.briefingPreviewScene, this.briefingPreviewCamera);
   }
@@ -1484,6 +1201,7 @@ class VectorShooterGame {
     this.briefingObject = item.create();
     this.briefingObject.scale.setScalar(item.scale);
     this.briefingObject.position.set(0, 0, 0);
+    this.briefingObject.rotation.set(0.35, -0.5, 0);
     this.briefingPreviewCamera.position.z = item.cameraZ;
     this.briefingPreviewScene.add(this.briefingObject);
     modelTitle.textContent = item.title;
@@ -1565,7 +1283,7 @@ class VectorShooterGame {
       },
       {
         title: 'WAYBASE',
-        description: 'Lawful trade and scan zone. Big boundary rings are not pickups.',
+        description: 'Docking station. Legal cargo sells here. Police patrol the yellow boundary.',
         create: createBaseModel,
         scale: 0.55,
         cameraZ: 86
@@ -1588,8 +1306,8 @@ class VectorShooterGame {
         title: 'WARP GATE',
         description: 'Fly through the hollow center to warp sectors. The yellow WARP arrow points at the opening.',
         create: createGateModel,
-        scale: 0.78,
-        cameraZ: 96
+        scale: 0.62,
+        cameraZ: 104
       }
     ];
   }
@@ -2309,7 +2027,7 @@ class VectorShooterGame {
       entity.id,
       target.faction
     );
-    this.sound.enemyShoot();
+    this.sound.enemyShoot(entity.faction, entity.object.position.distanceTo(this.playerPosition));
   }
 
   private spawnProjectile(
@@ -2385,7 +2103,7 @@ class VectorShooterGame {
 
   private destroyEntity(entity: WorldEntity, attackerFaction: Faction = 'player'): void {
     this.createExplosion(entity.object.position, entity.faction);
-    this.sound.explosion();
+    this.sound.explosion(entity.object.position.distanceTo(this.playerPosition));
     const playerKill = attackerFaction === 'player';
     if (entity.kind === 'pirate') {
       if (playerKill) {
@@ -2459,11 +2177,13 @@ class VectorShooterGame {
     launchOverlay.dataset.mode = 'death';
     launchOverlay.classList.remove('hidden');
     briefingStatus.textContent = 'SHIP LOST';
-    launchTitle.textContent = 'RELAUNCH';
+    launchTitle.textContent = 'GAME OVER';
     launchButton.textContent = 'RELAUNCH NOW';
     launchButton.disabled = false;
     deathTimer.textContent = this.deathCountdownRemaining.toString();
     deathCountdown.classList.remove('hidden');
+    this.sound.gameOver();
+    this.resize();
 
     this.deathCountdownInterval = window.setInterval(() => {
       this.deathCountdownRemaining -= 1;
@@ -2495,6 +2215,7 @@ class VectorShooterGame {
     deathCountdown.classList.add('hidden');
     deathTimer.textContent = '10';
     this.updateMissionBriefing();
+    this.resize();
   }
 
   private updateMissionBriefing(): void {
@@ -2689,7 +2410,7 @@ class VectorShooterGame {
     this.log(`Mission complete +${this.activeMission.reward}`);
     this.log('Head to the Warp Gate!');
     this.updateMissionBriefing();
-    this.sound.pickup();
+    this.sound.complete();
   }
 
   private showMissionBriefingScreen(): void {
@@ -2705,6 +2426,7 @@ class VectorShooterGame {
     deathCountdown.classList.add('hidden');
     deathTimer.textContent = '10';
     this.updateMissionBriefing();
+    this.resize();
   }
 
   private loadSector(sectorId: string, preserveMissionSeed: boolean): void {
@@ -2721,7 +2443,7 @@ class VectorShooterGame {
     this.ambushTriggered = false;
     this.sector = getSector(sectorId);
     this.rng = new SeededRandom(hashString(`${sectorId}:${Date.now()}`));
-    this.scene.fog = new THREE.FogExp2(this.sector.ambient, 0.00095);
+    this.scene.fog = new THREE.FogExp2(0x000000, 0.0004);
 
     this.playerPosition.set(0, 0, 0);
     this.yaw = 0;
@@ -2879,7 +2601,7 @@ class VectorShooterGame {
   }
 
   private createStarField(): { geometry: THREE.BufferGeometry; positions: Float32Array; points: THREE.Points } {
-    const count = 1100;
+    const count = 420;
     const positions = new Float32Array(count * 3);
     const color = new THREE.Color();
     const colors = new Float32Array(count * 3);
@@ -2890,7 +2612,7 @@ class VectorShooterGame {
       positions[index * 3] = direction.x;
       positions[index * 3 + 1] = direction.y;
       positions[index * 3 + 2] = direction.z;
-      color.setHSL(rng.range(0.45, 0.62), 0.7, rng.range(0.55, 0.9));
+      color.setScalar(rng.range(0.45, 0.85));
       colors[index * 3] = color.r;
       colors[index * 3 + 1] = color.g;
       colors[index * 3 + 2] = color.b;
@@ -2900,7 +2622,7 @@ class VectorShooterGame {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     const material = new THREE.PointsMaterial({
-      size: 3.2,
+      size: 5,
       map: createStarTexture(),
       vertexColors: true,
       transparent: true,
@@ -3027,6 +2749,8 @@ class VectorShooterGame {
   }
 
   private updateHud(): void {
+    arcadeScore.textContent = Math.floor(this.progress.score).toString().padStart(6, '0');
+    arcadeBest.textContent = Math.floor(Math.max(this.save.bestScore, this.progress.score)).toString().padStart(6, '0');
     sectorName.textContent = this.sector.name.toUpperCase();
     const sectorRep = this.progress.sectorReputation[this.sector.id] ?? 'clean';
     const wantedHere = wantedAppliesInSector(this.progress.wanted, this.sector.id);
