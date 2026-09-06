@@ -1,8 +1,14 @@
+/**
+ * Original short arcade sound phrases, synthesized locally without audio files.
+ * synthesizeEffect is browser-independent; SoundBank handles Web Audio playback.
+ */
 import type { Faction } from './logic';
 import type { WeaponFamily } from './arcade';
 
 type Wave = 'pulse' | 'triangle' | 'noise' | 'metal';
 interface Voice {
+  // notes are frequency steps in Hz (0 is silence), not MIDI notes. start/duration
+  // are seconds; duty changes pulse timbre and gated leaves gaps between steps.
   wave: Wave;
   notes: number[];
   level: number;
@@ -19,6 +25,10 @@ interface Effect {
 
 // Short, clocked phrases: pulse channels and shift-register noise, like an arcade sound board.
 const EFFECTS = {
+  shatter: { duration: 0.23, voices: [
+    { wave: 'noise', notes: [11000, 7200, 0, 5400, 2400, 900], level: 0.5, decay: 3.8, gated: true },
+    { wave: 'metal', notes: [1560, 780, 390, 130], level: 0.2, duration: 0.16, decay: 4 }
+  ] },
   fracture: { duration: 0.19, voices: [
     { wave: 'noise', notes: [8200, 4000, 1600, 900], level: 0.55, decay: 3.6 },
     { wave: 'metal', notes: [410, 205, 102], level: 0.3, decay: 3 }
@@ -96,6 +106,8 @@ export const SOUND_EFFECT_NAMES = Object.keys(EFFECTS) as SoundEffect[];
 export const SOUND_SAMPLE_RATE = 22050;
 
 export function synthesizeEffect(name: SoundEffect): Float32Array {
+  // Mix every voice into one mono buffer. Resetting the noise register per voice
+  // makes repeated synthesis reproducible for tests and cached playback.
   const effect: Effect = EFFECTS[name];
   const samples = new Float32Array(Math.ceil(effect.duration * SOUND_SAMPLE_RATE));
   for (const voice of effect.voices) {
@@ -114,6 +126,8 @@ export function synthesizeEffect(name: SoundEffect): Float32Array {
       phase += frequency / SOUND_SAMPLE_RATE;
       metalPhase = (metalPhase + frequency * 1.4375 / SOUND_SAMPLE_RATE) % 1;
       if (phase >= 1) {
+        // A 15-bit feedback register supplies clocked noise without Math.random.
+        // The current note frequency changes the noise clock, not its loudness.
         phase %= 1;
         const feedback = (register ^ (register >> 1)) & 1;
         register = (register >> 1) | (feedback << 14);
@@ -160,6 +174,8 @@ export class SoundBank {
   }
 
   async start(): Promise<void> {
+    // Called from a user action because browsers suspend sound until interaction.
+    // A shared limiter keeps overlapping weapons/explosions from overwhelming it.
     if (!this.context) {
       this.context = new AudioContext();
       this.master = this.context.createGain();
@@ -184,6 +200,7 @@ export class SoundBank {
   }
   pickup(): void { this.play('pickup', 0.7); }
   explosion(distance = 0): void { this.play('explosion', Math.max(0, 1 - distance / 1000)); }
+  shatter(distance = 0): void { this.play('shatter', Math.max(0, 1 - distance / 700) * 0.65); }
   warning(): void { this.play('warning', 0.8); }
   damage(): void { this.play('damage'); }
   warp(): void { this.play('warp', 0.85); }
@@ -202,6 +219,8 @@ export class SoundBank {
     const now = this.context.currentTime;
     if (now - (this.lastPlayed.get(name) ?? -Infinity) < 0.055) return;
     if (this.voices.size >= 14) {
+      // Arrival warnings may replace the oldest voice at capacity; routine shots
+      // can be dropped. This keeps the important cue audible during a busy battle.
       if (!priority) return;
       const oldest = this.voices.values().next().value!;
       this.voices.delete(oldest);
@@ -209,6 +228,8 @@ export class SoundBank {
     }
     this.lastPlayed.set(name, now);
     let buffer = this.buffers.get(name);
+    // Synthesize each phrase once, but create a new source per playback: Web Audio
+    // buffer sources are single-use, while their sample buffers can be reused.
     if (!buffer) {
       const samples = synthesizeEffect(name);
       buffer = this.context.createBuffer(1, samples.length, SOUND_SAMPLE_RATE);

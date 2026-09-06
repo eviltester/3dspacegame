@@ -1,11 +1,25 @@
+/**
+ * Run rules and persistence data, independent of the browser and Three.js.
+ * Most helpers deliberately mutate the supplied run; this makes the result of
+ * a purchase, death or reward easy to inspect in a unit test. No helper here
+ * writes localStorage: ArcadeGame decides when a state change must be saved.
+ */
 import { applyCargoPickup, createInitialProgress, instantTrade } from './logic';
 import type { CargoDrop, CargoType, Faction, PlayerProgress } from './logic';
+import { isControlScheme } from './input-layouts';
+import type { ControlScheme } from './input-layouts';
+import { GAME_MODES, SMUGGLER_EXTRA_LIFE_SCORE } from './modes';
+import type { GameMode } from './modes';
+import { emptyScoreboards, parseScoreboards, recordScore } from './scores';
+import type { Scoreboards } from './scores';
 
-export type GameMode = 'journey' | 'endless';
+export type { GameMode } from './modes';
 export type WeaponFamily = 'pulse' | 'spread' | 'lance';
 export type EnemyArchetype = 'raider' | 'flanker' | 'diver' | 'gunship' | 'minelayer' | 'carrier';
 export type BonusKind = 'asteroids' | 'canyon' | 'sequence';
 export type RunPhase = 'briefing' | 'playing' | 'cleared' | 'recovery' | 'bonusOffer' | 'bonus' | 'bonusResult' | 'shop' | 'gameover' | 'victory';
+// Only equipment and spendable/earned resources roll back on a retry.
+// Lives and continue status live outside this snapshot so death cannot undo itself.
 export interface RunResources {
   pilot: PlayerProgress;
   family: WeaponFamily;
@@ -14,6 +28,12 @@ export interface RunResources {
   charge: number;
 }
 export interface RunState extends RunResources {
+  /** Identifies the whole run across retries/resumes, not one particular stage. */
+  id: string;
+  /** Next banked-score threshold that can grant a Smuggler life. */
+  nextLifeScore: number;
+  /** Last delivered haul, retained so a resumed result screen can show it again. */
+  stageReward: number;
   practice?: boolean;
   mode: GameMode;
   seed: number;
@@ -21,21 +41,26 @@ export interface RunState extends RunResources {
   lives: number;
   continued: boolean;
   phase: RunPhase;
+  /** Starting resources for this stage, replaced only when advancing. */
   checkpoint: RunResources;
   cleared: boolean;
   bonusStatus: 'available' | 'entered' | 'settled' | 'skipped';
   chain: { kills: number; multiplier: number; remaining: number; recent: number[] };
   elapsed: number;
   timeRemaining: number;
+  /** null means unpaid; zero means settled with no time left. Do not conflate them. */
   timeBonus: number | null;
   kills: number;
   earlyCore: boolean;
 }
+// A profile outlives a run. It holds settings and separate progress for each mode;
+// starting-weapon unlocks are choices, never permanent damage or money bonuses.
 export interface ProfileSaveV2 {
   version: 2;
-  settings: { aimAssist: boolean; muted: boolean };
+  settings: { aimAssist: boolean; muted: boolean; controlScheme: ControlScheme };
   unlocked: WeaponFamily[];
-  records: Record<'journey' | 'endless' | 'journeyContinued' | 'endlessContinued', number>;
+  records: Record<GameMode | `${GameMode}Continued`, number>;
+  scoreboards: Scoreboards;
   legacyScore: number;
   checkpoints: Partial<Record<GameMode, RunState>>;
 }
@@ -44,21 +69,24 @@ export const JOURNEY_STAGE_COUNT = 99;
 export const STAGE_TIME_LIMIT = 120;
 export const TIME_BONUS_RATE = 10;
 export const FAMILIES: WeaponFamily[] = ['pulse', 'spread', 'lance'];
+/** Mission-critical items are player-only; police confiscate contraband only. */
 export function canNpcCollect(faction: Faction, type: CargoType, essential = false): boolean {
   if (essential || type === 'rescuePod') return false;
   return faction === 'police' ? type === 'contraband' : faction === 'pirate' || (faction === 'trader' && type !== 'contraband');
 }
 export const clone = <T>(value: T): T => structuredClone(value);
+// Deep cloning prevents later inventory changes from silently changing the checkpoint.
 export const resources = (run: RunResources): RunResources => clone({ pilot: run.pilot, family: run.family, tiers: run.tiers, magnet: run.magnet, charge: run.charge });
 
 export function newRun(mode: GameMode, seed: number, family: WeaponFamily = 'pulse'): RunState {
   const base: RunResources = { pilot: createInitialProgress(), family, tiers: { pulse: 1, spread: 1, lance: 1 }, magnet: 20, charge: 0 };
-  return { ...base, mode, seed: seed >>> 0, stage: 1, lives: 3, continued: false, phase: 'briefing', checkpoint: resources(base),
+  return { ...base, mode, id: `${mode}-${seed}`, nextLifeScore: SMUGGLER_EXTRA_LIFE_SCORE, stageReward: 0, seed: seed >>> 0, stage: 1, lives: 3, continued: false, phase: 'briefing', checkpoint: resources(base),
     cleared: false, bonusStatus: 'available', chain: { kills: 0, multiplier: 1, remaining: 0, recent: [] }, elapsed: 0,
     timeRemaining: STAGE_TIME_LIMIT, timeBonus: null, kills: 0, earlyCore: false };
 }
 
 export function timeBonusSeconds(run: Pick<RunState, 'timeRemaining'>): number {
+  // Absorb floating-point noise from repeated 1/60-second ticks before rounding down.
   return Math.max(0, Math.floor(run.timeRemaining + 1e-6));
 }
 export function formatStageTime(run: Pick<RunState, 'timeRemaining'>): string {
@@ -70,6 +98,7 @@ export function tickStageTime(run: RunState, dt: number): void {
   run.timeRemaining = Math.max(0, run.timeRemaining - dt);
 }
 export function settleTimeBonus(run: RunState): number | null {
+  // The paid marker is checked before adding credits, making repeated gate events harmless.
   if (!run.cleared || !['cleared', 'recovery'].includes(run.phase) || run.timeBonus !== null) return null;
   const credits = timeBonusSeconds(run) * TIME_BONUS_RATE;
   run.pilot.credits += credits;
@@ -88,6 +117,8 @@ export function rewardKill(run: RunState, base = 100): number {
   run.kills += 1;
   run.chain.kills += 1;
   run.chain.recent.push(0);
+  // recent stores kill ages in simulation seconds. Spend groups of three so a
+  // fourth kill does not immediately grant another multiplier increase.
   if (run.chain.recent.length >= 3) {
     run.chain.multiplier = Math.min(5, run.chain.multiplier + 1);
     run.chain.recent.splice(0, 3);
@@ -103,6 +134,7 @@ export function rewardInterception(run: RunState): void {
   run.pilot.score += 8 * run.chain.multiplier;
 }
 export function pickup(run: RunState, drop: CargoDrop): void {
+  // Weapon cores obey the arcade tier gate. Other pickups reuse the shared economy.
   if (drop.type === 'weaponCore') {
     const max = run.stage >= (run.mode === 'journey' ? 5 : 8) ? 3 : 2;
     if (run.tiers[run.family] < max) run.tiers[run.family] += 1;
@@ -111,6 +143,7 @@ export function pickup(run: RunState, drop: CargoDrop): void {
     run.pilot.weaponLevel = run.tiers[run.family];
   } else run.pilot = applyCargoPickup(run.pilot, drop);
 }
+/** Returns false when already paid; callers must then skip the celebration too. */
 export function settleStage(run: RunState): boolean {
   if (run.cleared) return false;
   run.cleared = true;
@@ -120,11 +153,14 @@ export function settleStage(run: RunState): boolean {
   return true;
 }
 export function bonusFor(run: Pick<RunState, 'mode' | 'stage'>): BonusKind | null {
+  if (run.mode === 'invaders' || run.mode === 'smuggler') return null;
   if (run.mode === 'journey') return run.stage < JOURNEY_STAGE_COUNT && run.stage % 4 === 3
     ? (['asteroids', 'canyon', 'sequence'] as const)[Math.floor(run.stage / 4) % 3] : null;
   return run.stage % 5 === 0 ? (['asteroids', 'canyon', 'sequence'] as const)[(run.stage / 5 - 1) % 3] : null;
 }
 export function settleBonus(run: RunState, ratio: number, targetScore?: number): { medal: string; credits: number; score: number; extraLife: boolean } | null {
+  // Only an entered, unpaid offer can settle. Target challenges supply their net
+  // score after shot penalties; other bonus courses use their completion ratio.
   if (run.bonusStatus !== 'entered') return null;
   const value = Math.max(0, Math.min(1, ratio));
   const medal = value >= 0.9 ? 'GOLD' : value >= 0.65 ? 'SILVER' : value >= 0.35 ? 'BRONZE' : 'SALVAGE';
@@ -146,6 +182,7 @@ export type Purchase = 'tier' | 'repair' | 'shield' | 'magnet';
 export function purchasePrice(run: RunState, kind: Purchase): number {
   return kind === 'tier' ? (run.tiers[run.family] === 1 ? 350 : 800) : kind === 'repair' ? 150 : kind === 'shield' ? 300 : 200;
 }
+/** The shop and purchase operation share this check so displayed eligibility is real. */
 export function purchaseBlocked(run: RunState, kind: Purchase): string | null {
   if (run.phase !== 'shop') return 'Dock first';
   if (kind === 'tier' && run.tiers[run.family] >= 3) return 'Maximum tier';
@@ -164,13 +201,17 @@ export function purchase(run: RunState, kind: Purchase): boolean {
   if (kind === 'magnet') run.magnet = 35;
   return true;
 }
+/** Restore the checkpoint without charging a life; loseLife handles that separately. */
 export function retry(run: RunState, useContinue = false): void {
   Object.assign(run, resources(run.checkpoint));
   if (useContinue) {
+    // Reset both copies of the score, otherwise another death could resurrect
+    // pre-continue points from the checkpoint.
     run.lives = 3;
     run.continued = true;
     run.pilot.score = 0;
     run.checkpoint.pilot.score = 0;
+    run.nextLifeScore = SMUGGLER_EXTRA_LIFE_SCORE;
   }
   run.cleared = false;
   run.elapsed = 0;
@@ -178,6 +219,7 @@ export function retry(run: RunState, useContinue = false): void {
   run.timeBonus = null;
   run.kills = 0;
   run.earlyCore = false;
+  run.stageReward = 0;
   run.bonusStatus = 'available';
   run.phase = 'briefing';
   resetChain(run);
@@ -198,15 +240,18 @@ export function advance(run: RunState): void {
   run.timeBonus = null;
   run.kills = 0;
   run.earlyCore = false;
+  run.stageReward = 0;
   run.bonusStatus = 'available';
   run.pilot.wanted = createInitialProgress().wanted;
   run.pilot.shield = Math.min(run.pilot.maxShield, run.pilot.shield + 25);
+  // Bank the finished stage, purchases and optional rewards as the next retry baseline.
   run.checkpoint = resources(run);
 }
 export function recordRun(profile: ProfileSaveV2, run: RunState): void {
   if (run.practice) return;
-  const key = `${run.mode}${run.continued ? 'Continued' : ''}` as keyof ProfileSaveV2['records'];
+  const key: keyof ProfileSaveV2['records'] = `${run.mode}${run.continued ? 'Continued' : ''}`;
   profile.records[key] = Math.max(profile.records[key], run.pilot.score);
+  recordScore(profile, run);
   if (run.stage >= 4 && run.cleared && !profile.unlocked.includes('spread')) profile.unlocked.push('spread');
   if (run.stage >= 8 && run.cleared && !profile.unlocked.includes('lance')) profile.unlocked.push('lance');
 }
@@ -216,20 +261,29 @@ export function freshProfile(legacy: unknown = null): ProfileSaveV2 {
   const unlocked: WeaponFamily[] = ['pulse'];
   if (Number(old.unlockedWeaponLevel) >= 2) unlocked.push('spread');
   if (Number(old.unlockedWeaponLevel) >= 3) unlocked.push('lance');
-  return { version: 2, settings: { aimAssist: true, muted: false }, unlocked, legacyScore: Math.max(0, Number(old.bestScore) || 0),
-    records: { journey: 0, endless: 0, journeyContinued: 0, endlessContinued: 0 }, checkpoints: {} };
+  return { version: 2, settings: { aimAssist: true, muted: false, controlScheme: 'mouse' }, unlocked, legacyScore: Math.max(0, Number(old.bestScore) || 0),
+    records: { journey: 0, endless: 0, invaders: 0, smuggler: 0, journeyContinued: 0, endlessContinued: 0, invadersContinued: 0, smugglerContinued: 0 }, scoreboards: emptyScoreboards(), checkpoints: {} };
 }
+/**
+ * Store a resumable checkpoint, not a snapshot of moving ships or projectiles.
+ * An interrupted fight restarts; a paid shop/result stays paid. Clone first so
+ * pausing and saving cannot reset the live game the player is about to resume.
+ */
 export function saveCheckpoint(profile: ProfileSaveV2, run: RunState): void {
   if (run.practice) return;
   const saved = clone(run);
   if (!saved.cleared && (saved.phase === 'playing' || saved.phase === 'briefing')) retry(saved);
-  if (saved.phase === 'bonus') { saved.phase = 'shop'; saved.bonusStatus = 'settled'; }
-  if (saved.phase === 'bonusResult') saved.phase = 'shop';
+  if (saved.mode === 'smuggler' && (saved.phase === 'bonus' || saved.phase === 'bonusResult')) retry(saved);
+  else {
+    if (saved.phase === 'bonus') { saved.phase = 'shop'; saved.bonusStatus = 'settled'; }
+    if (saved.phase === 'bonusResult') saved.phase = 'shop';
+  }
   profile.checkpoints[run.mode] = saved;
 }
+/** Validate stored profiles and supply defaults for missing fields. */
 export function parseProfile(raw: string | null, legacy: string | null): ProfileSaveV2 {
   let old: unknown = null;
-  try { old = legacy ? JSON.parse(legacy) : null; } catch { /* Invalid legacy data must not prevent a new game. */ }
+  try { old = legacy ? JSON.parse(legacy) : null; } catch { /* Invalid imported data must not prevent a new game. */ }
   const fallback = freshProfile(old);
   if (!raw) return fallback;
   try {
@@ -239,15 +293,20 @@ export function parseProfile(raw: string | null, legacy: string | null): Profile
     profile.unlocked = FAMILIES.filter(family => family === 'pulse' || parsed.unlocked?.includes(family));
     profile.settings.aimAssist = parsed.settings?.aimAssist !== false;
     profile.settings.muted = parsed.settings?.muted === true;
+    if (isControlScheme(parsed.settings?.controlScheme)) profile.settings.controlScheme = parsed.settings.controlScheme;
     profile.legacyScore = Math.max(fallback.legacyScore, Number(parsed.legacyScore) || 0);
+    profile.scoreboards = parseScoreboards(parsed.scoreboards);
     for (const key of Object.keys(profile.records) as Array<keyof typeof profile.records>) profile.records[key] = Math.max(0, Number(parsed.records?.[key]) || 0);
-    for (const mode of ['journey', 'endless'] as const) {
+    for (const mode of GAME_MODES) {
       const run = parsed.checkpoints?.[mode];
       if (validCheckpoint(run, mode)) {
-        // Older v2 saves have no bonus clock. Completed gate travel is not paid retroactively.
+        if (typeof run.id !== 'string') run.id = `${mode}-legacy-${run.seed}`;
+        if (run.nextLifeScore === undefined) run.nextLifeScore = (Math.floor(run.pilot.score / SMUGGLER_EXTRA_LIFE_SCORE) + 1) * SMUGGLER_EXTRA_LIFE_SCORE;
+        if (run.stageReward === undefined) run.stageReward = 0;
+        // Default missing clocks without paying for already-completed gate travel.
         if (run.timeRemaining === undefined) run.timeRemaining = Math.max(0, STAGE_TIME_LIMIT - (Number.isFinite(run.elapsed) ? Math.max(0, run.elapsed) : 0));
         if (run.timeBonus === undefined) run.timeBonus = run.cleared && !['cleared', 'recovery'].includes(run.phase) ? 0 : null;
-        // A completed twelve-stage Journey can depart its old final dock into the expanded campaign.
+        // A saved victory below the final stage resumes at its dock.
         if (mode === 'journey' && run.phase === 'victory' && run.stage < JOURNEY_STAGE_COUNT && run.cleared) run.phase = 'shop';
         run.chain.recent = Array.isArray(run.chain.recent) ? run.chain.recent.filter(age => Number.isFinite(age) && age >= 0 && age <= 5) : [];
         saveCheckpoint(profile, run);
@@ -256,9 +315,13 @@ export function parseProfile(raw: string | null, legacy: string | null): Profile
     return profile;
   } catch { return fallback; }
 }
+// Browser storage can be edited or incomplete. Validate nested
+// resources before runtime code assumes that inventory, tiers and lives exist.
 function validCheckpoint(run: RunState | undefined, mode: GameMode): run is RunState {
   if (!run || run.mode !== mode || !Number.isInteger(run.stage) || run.stage < 1 || (mode === 'journey' && run.stage > JOURNEY_STAGE_COUNT)) return false;
   if (run.practice !== undefined && run.practice !== false) return false;
+  if (run.nextLifeScore !== undefined && (!Number.isSafeInteger(run.nextLifeScore) || run.nextLifeScore < SMUGGLER_EXTRA_LIFE_SCORE || run.nextLifeScore % SMUGGLER_EXTRA_LIFE_SCORE !== 0)) return false;
+  if (run.stageReward !== undefined && (!Number.isSafeInteger(run.stageReward) || run.stageReward < 0)) return false;
   if (!['briefing', 'playing', 'cleared', 'recovery', 'bonusOffer', 'bonus', 'bonusResult', 'shop', 'gameover', 'victory'].includes(run.phase)) return false;
   if (!['available', 'entered', 'settled', 'skipped'].includes(run.bonusStatus) || typeof run.cleared !== 'boolean' || typeof run.continued !== 'boolean') return false;
   if (run.timeRemaining !== undefined && (!Number.isFinite(run.timeRemaining) || run.timeRemaining < 0 || run.timeRemaining > STAGE_TIME_LIMIT)) return false;

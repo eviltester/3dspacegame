@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+/** Ship-relative radar projection, kept independent of the main WebGL camera. */
+import type * as THREE from 'three';
 
 export const RADAR_RANGE = 650;
 const CENTER = 90;
@@ -12,10 +13,16 @@ export interface RadarContact {
 }
 
 export function projectRadarContact(position: THREE.Vector3, origin: THREE.Vector3, orientation: THREE.Quaternion) {
+  // Subtract our position, then undo our rotation. This turns world coordinates
+  // into right/up/ahead relative to the cockpit even when flying upside down.
   const local = position.clone().sub(origin).applyQuaternion(orientation.clone().invert());
   const distance = local.length();
+  // Ordinary contacts outside range are hidden below; gates remain pinned within
+  // the radar, so the exit can still be found after travelling a long way away.
   const scale = Math.max(RADAR_RANGE, distance);
   const x = CENTER + local.x / scale * WIDTH;
+  // The ellipse is the ship's X/Z flight plane. Height lifts the symbol off its
+  // plane point; the connecting stem shows above/below without losing range cues.
   const planeY = CENTER + local.z / scale * DEPTH;
   const height = local.y / scale * HEIGHT;
   return { x, planeY, y: planeY - height, height, distance };

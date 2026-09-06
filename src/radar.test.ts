@@ -1,10 +1,41 @@
 import * as THREE from 'three';
-import { describe, expect, it } from 'vitest';
-import { projectRadarContact, RADAR_RANGE } from './radar';
+import { describe, expect, it, vi } from 'vitest';
+import { projectRadarContact, RADAR_RANGE, renderRadar } from './radar';
+import type { RadarContact } from './radar';
 
 const origin = new THREE.Vector3();
 const orientation = new THREE.Quaternion();
 const project = (x: number, y: number, z: number) => projectRadarContact(new THREE.Vector3(x, y, z), origin, orientation);
+
+function drawingFixture() {
+  const context = {
+    save: vi.fn(), restore: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), closePath: vi.fn(),
+    stroke: vi.fn(), arc: vi.fn(), ellipse: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), setLineDash: vi.fn(), fillRect: vi.fn(),
+    lineWidth: 1, strokeStyle: '', fillStyle: '', globalAlpha: 1
+  };
+  const draw = (contacts: RadarContact[]) => renderRadar(context as unknown as CanvasRenderingContext2D, contacts, origin, orientation);
+  return { context, draw };
+}
+
+describe('radar drawing commands', () => {
+  it('draws cargo as an outlined triangle and a distant gate as a cross', () => {
+    const { context, draw } = drawingFixture();
+    draw([{ position: new THREE.Vector3(0, 0, -100), color: '#ff0', glyph: 'cargo' },
+      { position: new THREE.Vector3(0, 0, -1000), color: '#ff0', glyph: 'gate' }]);
+    expect(context.closePath).toHaveBeenCalledOnce(); expect(context.fillRect).not.toHaveBeenCalled();
+    const gate = project(0, 0, -1000);
+    expect(context.moveTo).toHaveBeenCalledWith(gate.x - 4, gate.y); expect(context.lineTo).toHaveBeenCalledWith(gate.x + 4, gate.y);
+    expect(context.moveTo).toHaveBeenCalledWith(gate.x, gate.y - 4); expect(context.lineTo).toHaveBeenCalledWith(gate.x, gate.y + 4);
+  });
+  it('uses dashed lower stems, solid upper stems and excludes distant ordinary contacts', () => {
+    const { context, draw } = drawingFixture();
+    draw([{ position: new THREE.Vector3(100, 200, -100), color: '#f00', glyph: 'ship' },
+      { position: new THREE.Vector3(-100, -200, -100), color: '#0f0', glyph: 'mine' },
+      { position: new THREE.Vector3(0, 0, -1000), color: '#fff', glyph: 'ship' }]);
+    expect(context.setLineDash).toHaveBeenCalledWith([2, 2]); expect(context.setLineDash).toHaveBeenCalledWith([]);
+    expect(context.fillRect).toHaveBeenCalledOnce(); expect(context.restore).toHaveBeenCalledOnce(); expect(context.globalAlpha).toBe(1);
+  });
+});
 
 describe('ship-relative 3D radar', () => {
   it('anchors height stems to the flight plane and distinguishes above, below, and level', () => {

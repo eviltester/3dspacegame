@@ -1,23 +1,35 @@
+/**
+ * Builds finite encounter rosters, then releases them through EncounterDirector.
+ * A stage definition is data: it does not spawn meshes or award anything. The
+ * same mode/stage always describes the same roster, including during a retry.
+ */
 import type { EnemyArchetype, GameMode } from './arcade';
 import { JOURNEY_STAGE_COUNT } from './arcade';
 import { endlessDifficulty } from './endless-difficulty';
+import { invaderStage } from './invaders';
+import { smugglerLeg } from './smuggler';
 import * as THREE from 'three';
 
 export function crossedGate(previous: THREE.Vector3, next: THREE.Vector3, position: THREE.Vector3, rotation: THREE.Quaternion, radius = 28): boolean {
+  // A gate is a hole in a plane, not a solid sphere. Intersect the entire movement
+  // segment so a fast ship can cross the opening without landing exactly inside it.
   const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1).applyQuaternion(rotation), position);
   const crossing = plane.intersectLine(new THREE.Line3(previous, next), new THREE.Vector3());
   return crossing !== null && crossing.distanceToSquared(position) < radius * radius;
 }
 
-export type StageKind = 'patrol' | 'rescue' | 'armada' | 'boss' | 'ambush' | 'escort' | 'defend' | 'assault';
+export type StageKind = 'patrol' | 'rescue' | 'armada' | 'boss' | 'ambush' | 'escort' | 'defend' | 'assault' | 'course';
 export interface WaveDefinition { at: number; enemies: EnemyArchetype[] }
 export interface StageDefinition { number: number; title: string; kind: StageKind; objective: string; waves: WaveDefinition[]; chapter: number; bossParts: number; speedScale: number; attackerCap: number; difficulty: ReturnType<typeof endlessDifficulty> }
+/** Small seeded generator for reproducible layouts and loot; not for cryptography. */
 export class Random {
   constructor(public state: number) { this.state >>>= 0; }
   next(): number { this.state = (1664525 * this.state + 1013904223) >>> 0; return this.state / 0x100000000; }
   range(min: number, max: number): number { return min + (max - min) * this.next(); }
   pick<T>(values: readonly T[]): T { return values[Math.floor(this.next() * values.length)]; }
 }
+// Author the opening chapter sequence here. Later Journey stages reuse these
+// encounter types with more flights; the final three stages have explicit remixes.
 const JOURNEY: Array<[StageKind, string, string]> = [
   ['patrol', 'PIRATE PATROL', 'Clear the pirate flights. Shoot incoming fire to charge your defensive blast.'],
   ['rescue', 'RESCUE OPERATION', 'Collect the white rescue pod, deliver it to the station, and clear the attackers.'],
@@ -32,10 +44,18 @@ const JOURNEY: Array<[StageKind, string, string]> = [
   ['armada', 'ELITE ARMADA', 'Break the final formation. Columns alternate dives with sweeping gunfire.'],
   ['boss', 'COMMAND CARRIER', 'Destroy its six outer systems. The core accelerates its attacks as its hull breaks.']
 ];
+// Ordinary ships keep these hull values at every difficulty. More pressure should
+// come from combinations and timing, not fighters that take ever longer to kill.
 export const HULL: Record<EnemyArchetype, number> = { raider: 48, flanker: 52, diver: 44, gunship: 115, minelayer: 72, carrier: 220 };
 
 export function stageDefinition(mode: GameMode, number: number): StageDefinition {
   const n = Math.min(mode === 'journey' ? JOURNEY_STAGE_COUNT : Infinity, Math.max(1, Math.floor(number)));
+  if (mode === 'invaders') return invaderStage(n);
+  if (mode === 'smuggler') {
+    const leg = smugglerLeg(n);
+    return { number: n, kind: 'course', title: leg.kind === 'asteroids' ? 'ASTEROID PASSAGE' : 'CANYON PASSAGE', chapter: 1, bossParts: 0,
+      objective: 'Carry your haul through the EXIT gate. Crashes or missed exits cost a life.', waves: [], speedScale: 1, attackerCap: 0, difficulty: endlessDifficulty(1) };
+  }
   const difficulty = endlessDifficulty(mode === 'endless' ? n : 1);
   const chapter = mode === 'journey' ? Math.min(3, Math.ceil(n / 4)) : Math.min(3, 1 + Math.floor(n / 5));
   const remix = n === 97 ? 4 : n === 98 ? 9 : n === 99 ? 11 : (n - 1) % JOURNEY.length;
@@ -80,6 +100,8 @@ export function stageDefinition(mode: GameMode, number: number): StageDefinition
 }
 export class EncounterDirector {
   private pack = 0;
+  // pending holds any part of an announced flight that could not fit under the
+  // 18-hostile cap. Never discard it, or a dense encounter would silently get easier.
   private pending: EnemyArchetype[] = [];
   private lastPack = -10;
   constructor(public definition: StageDefinition) {}
@@ -93,6 +115,8 @@ export class EncounterDirector {
       this.pack += 1;
       this.lastPack = time;
     }
+    // Empty arenas can request the next flight early, but occupied arenas respect
+    // its scheduled arrival. The cap applies even when a flight arrives in pieces.
     return this.pending.splice(0, Math.max(0, 18 - active));
   }
   drain(): void { this.pack = this.definition.waves.length; this.pending = []; }

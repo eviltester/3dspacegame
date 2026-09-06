@@ -1,3 +1,8 @@
+/**
+ * On-rails canyon course. Forward travel is automatic; mouse/keys move an offset
+ * within the corridor, and boost changes the forward rate. step() returns events
+ * rather than changing the main ship's score, lives or menus directly.
+ */
 import * as THREE from 'three';
 import { Random } from './encounters';
 import { bonusProfile } from './bonus-difficulty';
@@ -22,6 +27,8 @@ export function canyonSpeed(progress: number, boost: boolean, difficulty = 1): n
 }
 // Relative plane crossing catches a missed opening too, including a gate moving during this tick.
 export function canyonGateCrossing(previous: THREE.Vector3, next: THREE.Vector3, gate: CanyonGate): boolean | null {
+  // null = not crossed yet, false = crossed outside, true = crossed through.
+  // The polygon's inner radius minus craft clearance is smaller than its corners.
   const before = previous.clone().sub(gate.previous), after = next.clone().sub(gate.object.position);
   if (before.z < 0 || after.z > 0 || before.z === after.z) return null;
   const crossing = before.lerp(after, before.z / (before.z - after.z));
@@ -53,6 +60,8 @@ export class CanyonCourse {
     this.speed = canyonSpeed(0, false, profile.level);
     this.length = this.path.getLength();
     const rng = new Random(seed);
+    // Draw successive cross-sections along the same curve used for flight. Geometry,
+    // gates and targets therefore agree on where the traversable corridor lies.
     for (let i = 0; i < 80; i++) {
       const c = this.path.getPointAt(i / 80), n = this.path.getPointAt((i + 1) / 80);
       this.root.add(lineShape([
@@ -118,6 +127,8 @@ export class CanyonCourse {
       const pass = canyonGateCrossing(this.previous, camera.position, gate);
       if (pass === null) continue;
       gate.resolved = true; gate.passed = pass;
+      // Each plane crossing is final. A valid green gate resets the miss streak;
+      // the last gate is an exit aperture, whose miss is a wall collision instead.
       if (gate.exit) { events.end = pass ? 'complete' : 'wall'; break; }
       this.nextGate++;
       if (pass) { this.passed++; this.missed = 0; events.points += 5; }
@@ -175,6 +186,8 @@ export class CanyonCourse {
   clearFire(position: THREE.Vector3): void {
     for (const bolt of this.shots) if (bolt.object.position.distanceTo(position) <= 240) { bolt.used = true; bolt.object.visible = false; }
   }
+  // Integrate distance / accelerating speed from here to the exit at 98.5%.
+  // This estimates travel time without boost, rather than imposing a fixed timer.
   get remaining(): number { return Math.max(0, this.length / (96 * this.profile.flightScale) * Math.log((48 + 96 * 0.985) / (48 + 96 * this.progress))); }
   get snapshot() {
     return { progress: this.progress, speed: this.speed, boosting: this.boosting, offset: this.offset.toArray(), passed: this.passed,

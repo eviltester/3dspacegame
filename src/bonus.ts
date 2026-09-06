@@ -1,10 +1,17 @@
+/**
+ * Self-contained flight-course simulation used by optional sorties and Smuggler Run.
+ * It owns temporary health, weapons, targets and visuals, but never spends a run
+ * life or writes a save. ArcadeGame settles the result according to the active mode.
+ */
 import * as THREE from 'three';
 import type { BonusKind, WeaponFamily } from './arcade';
+import { flightControls } from './input-layouts';
+import type { ControlScheme } from './input-layouts';
 import { bonusProfile, TARGET_HIT_POINTS, TARGET_SHOT_COST } from './bonus-difficulty';
 import { CanyonCourse } from './canyon';
 import type { CanyonEnd } from './canyon';
 import { crossedGate, Random } from './encounters';
-import { createBoltModel, createCargoModel, createPulseRing, createTextSprite, disposeObject, edgesFromGeometry, lineShape } from './models';
+import { ASTEROID_COLORS, createBoltModel, createCargoModel, createPulseRing, createTextSprite, disposeObject, edgesFromGeometry, lineShape } from './models';
 import { sweptHit, weaponSpec } from './weapons';
 
 export interface BonusRunState {
@@ -15,6 +22,8 @@ export interface BonusRunState {
   remaining: number;
   health: number;
   charge: number;
+  // Course points are not main-run points yet. Optional medals and Smuggler delivery
+  // rewards translate this subtotal differently after the course has finished.
   points: number;
   difficulty: number;
   targetCount: number;
@@ -26,7 +35,7 @@ export interface BonusRunState {
   fractures: number;
   enemyShots: number;
 }
-interface AsteroidMotion { size: 0 | 1 | 2; velocity: THREE.Vector3; previous: THREE.Vector3; age: number; grace: number; spin: number }
+interface AsteroidMotion { size: 0 | 1 | 2; color: number; velocity: THREE.Vector3; previous: THREE.Vector3; age: number; grace: number; spin: number }
 interface MarkerMotion { home: THREE.Vector3; phase: number; direction: number; amplitude: THREE.Vector2 }
 interface BonusObject { kind: 'rock' | 'salvage' | 'gate' | 'marker' | 'turret' | 'obstacle' | 'hostileBolt'; object: THREE.Object3D; radius: number; number: number; used: boolean; rock?: AsteroidMotion; marker?: MarkerMotion }
 export const MAX_ASTEROID_FRAGMENTS = 64;
@@ -39,23 +48,23 @@ export function asteroidFlight(elapsed: number, difficulty = 1): { progress: num
   // Integrate the accelerating flight: harder runs cover the same route more quickly.
   return { progress: 0.6 * t + 0.4 * t * t, speed: (48 + 64 * t) * scale };
 }
-const ROCK_COLORS = [0xffd179, 0xe3bd8f, 0xb1a596];
 export function asteroidGap(row: number): THREE.Vector2 { return new THREE.Vector2(Math.sin(row * 0.85) * 20, Math.sin(row * 0.6) * 9); }
 export const BONUS_NAMES: Record<BonusKind, string> = { asteroids: 'ASTEROID RUN', canyon: 'CANYON SORTIE', sequence: 'TARGET SEQUENCE' };
 export const BONUS_BRIEFS: Record<BonusKind, string> = {
-  asteroids: 'Loan skiff. Automatic speed increases throughout the belt. Follow the weaving gaps and scoop yellow salvage. Fly through the green EXIT gate at the end; missing it ends the bonus. Large rocks split into medium rocks, then small drifting fragments. Mouse steers; hold left click to fire. Right click uses your charged blast to vaporize nearby rocks. Pause for Exit Bonus.',
-  canyon: 'Automatic acceleration: no throttle or brake. Mouse steers; Shift or wheel forward boosts. Hold left click to destroy amber obstacles and red guns. Right click uses your charged blast. Green gates shrink and move. Miss two in a row and the sortie ends. Fly through EXIT in the final wall or crash. Pause for Exit Bonus.',
-  sequence: 'Shoot the shuffled numbers in order. The yellow marker is next. After your first hit, the remaining targets drift faster as you clear them. Correct target: +100 points. Every shot: -5 points, including misses (Spread counts as one volley). Wrong targets also cost two seconds. Mouse aims; left click fires. Pause for Exit Bonus. Only your bonus score is at risk.'
+  asteroids: 'Loan skiff. Automatic speed increases throughout the belt. Follow the weaving gaps and scoop yellow salvage. Fly through the green EXIT gate at the end; missing it ends the bonus. Large rocks split into medium rocks, then small drifting fragments. Charged blasts vaporize nearby rocks.',
+  canyon: 'Automatic acceleration: no throttle or brake. Shift or wheel forward boosts. Destroy amber obstacles and red guns. Green gates shrink and move. Miss two in a row and the sortie ends. Fly through EXIT in the final wall or crash.',
+  sequence: 'Shoot the shuffled numbers in order. The yellow marker is next. After your first hit, the remaining targets drift faster as you clear them. Correct target: +100 points. Every shot: -5 points, including misses (Spread counts as one volley). Wrong targets also cost two seconds. Only your bonus score is at risk.'
 };
-export function bonusBrief(kind: BonusKind, difficulty: number): string {
+export function bonusBrief(kind: BonusKind, difficulty: number, scheme: ControlScheme = 'mouse'): string {
   const profile = bonusProfile(difficulty);
   const details = kind === 'sequence' ? `${profile.targetCount} targets. Shoot 1 to ${profile.targetCount}.`
     : kind === 'asteroids' ? `${profile.asteroidRows} rock formations. Speed ${Math.round(48 * profile.flightScale)} to ${Math.round(112 * profile.flightScale)}.`
       : `${profile.canyonObstacles} obstacles / ${Math.ceil(profile.canyonObstacles / 2)} guns. Speed ${Math.round(48 * profile.flightScale)} to ${Math.round(144 * profile.flightScale)}, plus boost.`;
-  return `${details} ${BONUS_BRIEFS[kind]}`;
+  return `${details} ${BONUS_BRIEFS[kind]} ${flightControls(scheme)} Esc pauses for Exit Bonus.`;
 }
 
 export class BonusController {
+  // Everything temporary is attached beneath root for hiding/disposal as one course.
   readonly root = new THREE.Group();
   readonly state: BonusRunState;
   readonly path: THREE.CatmullRomCurve3;
@@ -68,6 +77,7 @@ export class BonusController {
   private markerClock = 0;
   private markerSpeed = 0;
   private asteroidGate: BonusObject | null = null;
+  private rockColorIndex = 0;
   private exitAnnounced = false;
   private collisionDelay = 0;
   private blastEffect: { object: THREE.LineSegments; life: number; direction: THREE.Vector3 } | null = null;
@@ -81,6 +91,8 @@ export class BonusController {
       difficulty: profile.level, targetCount: profile.targetCount, shotsFired: 0, nextMarker: 1, finished: false, reason: null, notice: '', fractures: 0, enemyShots: 0 };
     const rng = this.rng = new Random(seed);
     if (kind === 'canyon') {
+      // CanyonCourse handles its path, gates and gunfire; this wrapper supplies the
+      // common weapon, three-hit health and completion interface used by all courses.
       this.canyon = new CanyonCourse(this.root, seed, profile.level); this.path = this.canyon.path;
       this.objects.push(...this.canyon.targets); this.state.remaining = this.canyon.remaining;
       this.state.duration = this.state.remaining; return;
@@ -89,6 +101,8 @@ export class BonusController {
     this.path = new THREE.CatmullRomCurve3(points);
     if (kind === 'sequence') {
       const numbers = Array.from({ length: profile.targetCount }, (_, i) => i + 1);
+      // Fisher-Yates shuffle: every marker number appears once, with a reproducible
+      // order. Keep positions in cells so moving labels cannot collide later.
       for (let i = numbers.length - 1; i > 0; i--) {
         const j = Math.floor(rng.next() * (i + 1));
         [numbers[i], numbers[j]] = [numbers[j], numbers[i]];
@@ -110,10 +124,15 @@ export class BonusController {
         const row = i * 55 / profile.asteroidRows, t = row / 58;
         const center = this.path.getPoint(t);
         const gap = asteroidGap(row);
+        const angle = rng.range(0, Math.PI * 2);
         for (let j = 0; j < 2; j += 1) {
           const radius = rng.range(10, 13);
-          // Leave a twelve-unit gap around a gently weaving route, not a straight safe tunnel.
-          const position = center.clone().add(new THREE.Vector3(gap.x + (j ? 1 : -1) * (radius + 14), gap.y, 0));
+          const z = center.z + rng.range(-14, 14);
+          const route = asteroidGap(-z / ASTEROID_LENGTH * 58);
+          const bearing = angle + j * Math.PI + rng.range(-0.35, 0.35);
+          const distance = radius + rng.range(16, 21);
+          // Scatter around the route at each rock's actual depth, keeping its opening clear.
+          const position = new THREE.Vector3(route.x + Math.cos(bearing) * distance, route.y + Math.sin(bearing) * distance, z);
           this.addRock(position, radius, 2);
         }
         if (i % 2 === 0) {
@@ -137,14 +156,19 @@ export class BonusController {
     this.objects.push(item);
     return item;
   }
-  private addRock(position: THREE.Vector3, radius: number, size: 0 | 1 | 2, velocity = new THREE.Vector3()): void {
+  private addRock(position: THREE.Vector3, radius: number, size: 0 | 1 | 2, velocity = new THREE.Vector3(), inheritedColor?: number): void {
+    // Cycle mineral colours without consuming layout randomness. Fragments inherit
+    // their parent's colour, so this cosmetic change cannot alter a seeded route.
+    const color = inheritedColor ?? ASTEROID_COLORS[this.rockColorIndex++ % ASTEROID_COLORS.length];
     const geometry = size === 2 ? new THREE.IcosahedronGeometry(radius, 0) : new THREE.OctahedronGeometry(radius, 0);
-    const object = edgesFromGeometry(geometry, ROCK_COLORS[size], 0.9);
+    const object = edgesFromGeometry(geometry, color, 0.9);
     object.position.copy(position); object.rotation.set(this.rng.range(0, 3), this.rng.range(0, 3), this.rng.range(0, 3));
-    this.add('rock', object, radius).rock = { size, velocity, previous: position.clone(), age: 0,
+    this.add('rock', object, radius).rock = { size, color, velocity, previous: position.clone(), age: 0,
       grace: size < 2 ? ASTEROID_FRAGMENT_GRACE : 0, spin: this.rng.range(-1, 1) * (size === 2 ? 0.25 : 1.4) };
   }
   private breakRock(item: BonusObject): void {
+    // Large -> two medium -> two small per medium. Fresh fragments have brief
+    // collision grace, and a hard cap prevents a splitting chain overwhelming WebGL.
     this.consume(item);
     const rock = item.rock;
     if (!rock || rock.size === 0) return;
@@ -156,7 +180,7 @@ export class BonusController {
       const position = item.object.position.clone().addScaledVector(spread, side * radius * 1.2);
       const velocity = rock.velocity.clone().multiplyScalar(0.4).addScaledVector(spread, side * speed);
       velocity.z = this.rng.range(14, 23);
-      this.addRock(position, radius, size, velocity);
+      this.addRock(position, radius, size, velocity, rock.color);
     }
     this.state.fractures++;
   }
@@ -190,6 +214,8 @@ export class BonusController {
       if (events.end) this.finish(events.end);
       else if (events.damage) this.damage();
     } else if (this.state.kind === 'sequence') {
+      // Delay motion until the first correct hit so the player can recognize the
+      // field, then ease toward faster movement as the sequence is completed.
       if (this.state.nextMarker > 1) {
         const speed = (0.7 + (this.state.nextMarker - 2) / (this.state.targetCount - 1) * 2.1) * this.profile.motionScale;
         this.markerSpeed = Math.min(4.5, speed, this.markerSpeed + dt * 1.5 * this.profile.motionScale);
@@ -218,7 +244,7 @@ export class BonusController {
         item.object.position.addScaledVector(rock.velocity, dt); item.object.rotation.x += rock.spin * dt; item.object.rotation.y += rock.spin * dt * 0.7;
         if (rock.size < 2) {
           const material = (item.object as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>).material;
-          material.color.setHex(rock.grace > 0 ? 0xfff5dd : ROCK_COLORS[rock.size]);
+          material.color.setHex(rock.grace > 0 ? 0xfff5dd : rock.color);
           if (rock.age > 12 || item.object.position.z > camera.position.z + 40) { this.consume(item); continue; }
         }
         if (rock.grace > 0) continue;
@@ -269,6 +295,8 @@ export class BonusController {
     const spec = weaponSpec(this.state.family, 1);
     const forward = camera.getWorldDirection(new THREE.Vector3());
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    // Course fire resolves hits immediately by ray, with traveling bolts as visuals.
+    // Snapshot targets before firing so a volley cannot also hit fragments it creates.
     const candidates: BonusObject[] = [...this.objects, ...(this.canyon?.shots ?? [])].filter(item => !item.used && item.kind !== 'gate' && item.kind !== 'salvage');
     let confirmed = false, wrongMarker = false, targetHit = false;
     for (let index = 0; index < spec.count; index++) {
@@ -304,6 +332,8 @@ export class BonusController {
     return confirmed;
   }
   blast(camera: THREE.PerspectiveCamera): boolean {
+    // Blasts consume the whole charge and vaporize hazards without splitting rocks.
+    // Salvage, gates and numbered markers are deliberately outside this target list.
     if (this.state.finished || this.state.charge < 100) return false;
     this.state.charge = 0;
     for (const item of this.objects) {
@@ -329,11 +359,14 @@ export class BonusController {
     if (this.state.health <= 0) this.finish('crash');
   }
   finish(reason: NonNullable<BonusRunState['reason']>): void {
+    // Preserve the first outcome: a later timeout must not replace a gate success.
     if (this.state.finished) return;
     this.state.finished = true;
     this.state.reason = reason;
   }
   get ratio(): number {
+    // Optional medal scoring uses partial progress, not just pass/fail. Smuggler
+    // ignores this ratio and banks its own haul only on a successful exit.
     if (this.state.kind === 'sequence') return THREE.MathUtils.clamp(this.state.points / (this.state.targetCount * (TARGET_HIT_POINTS - TARGET_SHOT_COST)), 0, 1);
     if (this.canyon) return Math.min(1, this.canyon.progress * 0.3 + this.canyon.passed / 18 * 0.4 + this.state.points / 150 * 0.3);
     return Math.min(1, (this.state.elapsed / this.state.duration) * 0.4 + this.state.points / this.profile.asteroidRows * 0.6);

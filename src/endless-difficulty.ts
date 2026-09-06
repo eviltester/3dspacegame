@@ -1,9 +1,13 @@
+// Attack Challenge difficulty tuning.
+// Tune pressure here; encounter composition and physical ship models live elsewhere.
 export const ENEMY_ATTACK_WARNING = 0.8;
 
 export function endlessDifficulty(wave: number) {
   const n = Number.isFinite(wave) ? Math.max(1, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(wave))) : 1;
   // Logarithmic growth keeps huge wave selections cheap without flattening the whole encounter.
   const pressure = Math.log2(1 + (n - 1) / 5);
+  // Counts grow with pressure; speeds/cooldowns approach bounded limits. This keeps
+  // wave 1000 harder without requiring impossible reactions or enormous allocations.
   return {
     pressure,
     flights: 2 + Math.floor(pressure * 1.5),

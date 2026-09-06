@@ -131,6 +131,27 @@ function isolatedAsteroid(seed = 12) {
 }
 
 describe('splitting asteroid belt', () => {
+  it('both fragment generations return to the parent colour after their birth flash', () => {
+    const { bonus, camera, rock } = isolatedAsteroid();
+    const material = (id: number) => (bonus.root.getObjectById(id) as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>).material;
+    const color = material(rock.id).color.getHex();
+    expect(bonus.shoot(camera)).toBe(true);
+    for (const size of [1, 0]) {
+      const fragments = bonus.rocks.filter(item => item.size === size);
+      expect(fragments).toHaveLength(2);
+      bonus.step(1 / 60, { x: 0, y: 0 }, camera);
+      for (const fragment of fragments) expect(material(fragment.id).color.getHex()).toBe(0xfff5dd);
+      bonus.step(ASTEROID_FRAGMENT_GRACE, { x: 0, y: 0 }, camera);
+      for (const fragment of fragments) expect(material(fragment.id).color.getHex()).toBe(color);
+      if (size === 1) {
+        for (const object of bonus.root.children) object.position.set(1000, 1000, -1000);
+        bonus.root.getObjectById(fragments[0].id)!.position.copy(camera.position).add(new THREE.Vector3(0, 0, -160));
+        expect(bonus.shoot(camera)).toBe(true);
+      }
+    }
+    bonus.dispose();
+  });
+
   it('splits large into two medium, medium into two small, and destroys small outright', () => {
     const { bonus, camera, rock } = isolatedAsteroid();
     const originalRadius = bonus.rocks.find(item => item.id === rock.id)!.radius;

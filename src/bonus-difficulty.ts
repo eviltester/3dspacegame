@@ -1,3 +1,4 @@
+/** Eight shared tuning presets for bonus offers, Smuggler courses and title previews. */
 import type { GameMode } from './arcade';
 
 export const BONUS_DIFFICULTY_LEVELS = 8;
@@ -9,6 +10,8 @@ export function bonusDifficulty(mode: GameMode, stage: number): number {
 }
 
 export function bonusProfile(difficulty = 1) {
+  // All course generators use this normalized level. Density, movement and aperture
+  // size change together, while shot-speed growth remains capped at 35 percent.
   const level = Number.isFinite(difficulty) ? Math.max(1, Math.min(BONUS_DIFFICULTY_LEVELS, Math.floor(difficulty))) : 1;
   const pressure = level - 1;
   return {

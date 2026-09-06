@@ -1,3 +1,8 @@
+/**
+ * Shared cargo, trade and faction-law rules. These functions generally return a
+ * new PlayerProgress rather than mutating it; arcade.ts adapts them to a live run.
+ * Arcade stage sequencing and three-tier weapon families live in arcade/encounters.
+ */
 export type Faction = 'player' | 'pirate' | 'trader' | 'police' | 'neutral';
 
 export type EntityKind =
@@ -104,6 +109,7 @@ export interface ContrabandScanResult {
 }
 
 export const SAVE_KEY = 'vector-shooter-save-v1';
+// PlayerProgress ceiling; arcade.ts handles weapon cores with a separate three-tier family cap.
 export const MAX_WEAPON_LEVEL = 5;
 export const POLICE_DISPATCH_DELAY = 8;
 export const CONTRABAND_FINE = 140;
@@ -230,6 +236,8 @@ export function discoverSector(progress: PlayerProgress, sectorId: string): Play
 }
 
 export function applyCargoPickup(progress: PlayerProgress, drop: CargoDrop): PlayerProgress {
+  // Money and powerups apply immediately; goods stay in inventory until a valid
+  // trade zone accepts them. Clone inventory so the caller's checkpoint stays intact.
   const amount = Math.max(1, Math.floor(drop.amount));
   const inventory = { ...progress.inventory };
   let credits = progress.credits;
@@ -279,6 +287,8 @@ export function applyCargoPickup(progress: PlayerProgress, drop: CargoDrop): Pla
 }
 
 export function instantTrade(progress: PlayerProgress, zone: TradeZone): TradeResult {
+  // Remove exactly the goods that were sold. Calling again while still near the
+  // station returns zero income, which makes automatic proximity trading safe.
   const inventory = { ...progress.inventory };
   const sold: TradeResult['sold'] = {};
   let creditsEarned = 0;
@@ -325,6 +335,8 @@ export function attackFaction(
   targetFaction: Faction,
   wasProvoked: boolean
 ): PlayerProgress {
+  // Shooting pirates, or returning provoked fire, must never create a new warrant.
+  // ArcadeGame also routes unprovoked police attacks through this protected-ship rule.
   if (targetFaction !== 'trader' || wasProvoked) {
     return progress;
   }
@@ -379,6 +391,8 @@ export function markPoliceArrived(progress: PlayerProgress): PlayerProgress {
 }
 
 export function resolveContrabandScan(progress: PlayerProgress, sectorId: string): ContrabandScanResult {
+  // Having no contraband is always safe. A payable fine seizes it; being unable
+  // to pay authorizes pursuit. Scans are not a random penalty for clean pilots.
   if (progress.inventory.contraband <= 0) {
     return {
       progress,

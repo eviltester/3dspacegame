@@ -1,6 +1,14 @@
+/**
+ * Browser presentation shell: HUD elements, menu focus and rotating previews.
+ * Menu buttons send named actions to ArcadeGame; displaying a view does not start
+ * a mission or purchase anything by itself.
+ */
 import * as THREE from 'three';
 import { createCatalog, disposeObject } from './models';
 import { drawVectorTitle } from './vector-title';
+import { ModePreview } from './menus/mode-preview';
+import { MODE_INFO } from './modes';
+import type { GameMode } from './modes';
 
 export const button = (action: string, label: string, extra = '') => `<button type="button" data-action="${action}" ${extra}>${label}</button>`;
 export class GameUI {
@@ -14,8 +22,9 @@ export class GameUI {
   private previewObject: THREE.Object3D | null = null;
   private scan = 0;
   private scanTime = 0;
-  private title = 'VECTOR SHOOTER';
+  private title = '3D VECTOR SPACE SHOOTER';
   private screen = 'title';
+  private demo: ModePreview | null = null;
   constructor(action: (action: string) => void) {
     document.querySelector('#app')!.innerHTML = `
       <main class="game-shell">
@@ -38,9 +47,10 @@ export class GameUI {
         <div id="damageLayer" class="damage-layer"></div><div id="warpLayer" class="warp-layer"></div>
         <div id="launchOverlay" class="launch-overlay">
           <div class="arcade-menu">
-            <header class="arcade-header"><div class="arcade-scores"><span>1UP <strong id="arcadeScore">000000</strong></span><span>HI SCORE <strong id="arcadeBest">000000</strong></span></div><h1 id="launchTitle" class="screen-reader-only">VECTOR SHOOTER</h1><canvas id="vectorTitle" class="vector-title" aria-hidden="true"></canvas><p id="briefingStatus" class="briefing-status"></p></header>
+            <header class="arcade-header"><div class="arcade-scores"><span>1UP <strong id="arcadeScore">000000</strong></span><span>HI SCORE <strong id="arcadeBest">000000</strong></span></div><h1 id="launchTitle" class="screen-reader-only">3D VECTOR SPACE SHOOTER</h1><canvas id="vectorTitle" class="vector-title" aria-hidden="true"></canvas><p id="briefingStatus" class="briefing-status"></p></header>
             <div class="menu-layout"><div id="screenContent"></div>
-              <section id="catalogSection" class="model-card" aria-label="Game objects"><div class="model-kicker"><p class="briefing-status">OBJECT SCAN</p><p id="modelCount"></p></div><div id="modelPreview" class="model-preview"></div><div class="model-copy"><h2 id="modelTitle"></h2><p id="modelDescription"></p></div><div class="scan-buttons">${button('scanPrevious', '<', 'aria-label="Previous object" title="Previous object"')}${button('scanNext', '>', 'aria-label="Next object" title="Next object"')}</div></section>
+              <section id="modePreviewSection" class="mode-preview-section" aria-label="Selected mode preview"><div id="modeDemo" class="mode-demo"></div><h2 id="modePreviewName"></h2><p id="modePreviewTagline"></p></section>
+              <section id="catalogSection" class="model-card" aria-label="Ships and objects"><div class="model-kicker"><p class="briefing-status">SHIPS &amp; OBJECTS</p><p id="modelCount"></p></div><div id="modelPreview" class="model-preview"></div><div class="model-copy"><h2 id="modelTitle"></h2><p id="modelDescription"></p></div><div class="scan-buttons">${button('scanPrevious', '<', 'aria-label="Previous object" title="Previous object"')}${button('scanNext', '>', 'aria-label="Next object" title="Next object"')}</div><p class="scan-hint"><span>LEFT / RIGHT</span> Browse ships &amp; objects</p></section>
             </div>
           </div>
         </div>
@@ -59,16 +69,29 @@ export class GameUI {
       else action(target.dataset.action!);
     });
     window.addEventListener('keydown', event => {
-      if (this.overlay.hidden || !['title', 'briefing'].includes(this.screen)) return;
+      if (this.overlay.hidden || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
+      if (event.code === 'Tab') {
+        const items = [...this.overlay.querySelectorAll<HTMLElement>('button:not(:disabled), select, input')].filter(item => item.getClientRects().length);
+        const target = event.shiftKey ? items.at(-1) : items[0];
+        if (document.activeElement === (event.shiftKey ? items[0] : items.at(-1))) { event.preventDefault(); target?.focus(); }
+      }
+      if (!['objects', 'briefing'].includes(this.screen)) return;
       if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') { event.preventDefault(); this.changeScan(event.code === 'ArrowLeft' ? -1 : 1); }
     });
     this.changeScan(0);
+  }
+  selectMode(mode: GameMode): void {
+    if (this.demo?.mode !== mode) { this.demo?.dispose(); this.demo = new ModePreview(mode); }
+    this.text('modePreviewName', MODE_INFO[mode].name); this.text('modePreviewTagline', MODE_INFO[mode].summary);
   }
   text(id: string, value: string): void {
     const element = document.getElementById(id);
     if (element && element.textContent !== value) element.textContent = value;
   }
   show(screen: string, title: string, status: string, content: string): void {
+    // Preserve the selected action when a shop/settings view is rebuilt. Otherwise
+    // prefer Resume/Play, so keyboard users do not lose their place after each click.
+    const previousAction = this.screen === screen && document.activeElement instanceof HTMLElement ? document.activeElement.dataset.action : undefined;
     this.screen = screen;
     this.title = title;
     this.overlay.hidden = false;
@@ -79,22 +102,32 @@ export class GameUI {
     this.text('briefingStatus', status);
     document.querySelector('#screenContent')!.innerHTML = content;
     const catalog = document.querySelector<HTMLElement>('#catalogSection')!;
-    catalog.hidden = screen !== 'title' && screen !== 'briefing';
-    this.overlay.classList.toggle('compact-menu', catalog.hidden);
+    catalog.hidden = screen !== 'objects' && screen !== 'briefing';
+    document.querySelector<HTMLElement>('#modePreviewSection')!.hidden = screen !== 'title';
+    // Reuse one preview renderer/context between the title demo and object guide.
+    document.querySelector(screen === 'title' ? '#modeDemo' : '#modelPreview')!.append(this.preview.domElement);
+    this.overlay.classList.toggle('compact-menu', catalog.hidden && screen !== 'title');
+    document.querySelector<HTMLElement>('.flight-buttons')!.inert = true;
     this.resize();
+    const buttons = [...this.overlay.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')].filter(item => item.getClientRects().length);
+    const focus = buttons.find(item => item.dataset.action === previousAction) ?? this.overlay.querySelector<HTMLElement>('#resumeButton, #launchButton') ?? buttons[0];
+    focus?.focus({ preventScroll: true });
   }
-  hide(): void { this.overlay.hidden = true; this.overlay.classList.add('hidden'); }
+  hide(): void { this.overlay.hidden = true; this.overlay.classList.add('hidden'); document.querySelector<HTMLElement>('.flight-buttons')!.inert = false; }
   resize(): void {
     const canvas = document.querySelector<HTMLCanvasElement>('#vectorTitle')!;
     drawVectorTitle(canvas, this.title, this.screen === 'gameover' ? '#ff5050' : '#ffff70');
-    const bounds = document.querySelector('#modelPreview')!.getBoundingClientRect();
+    const bounds = document.querySelector(this.screen === 'title' ? '#modeDemo' : '#modelPreview')!.getBoundingClientRect();
     const width = Math.max(180, bounds.width);
     const height = Math.max(160, bounds.height);
     this.preview.setSize(width, height, false);
     this.previewCamera.aspect = width / height;
     this.previewCamera.updateProjectionMatrix();
+    this.demo?.resize(width / height);
   }
   private changeScan(direction: number): void {
+    // Manual navigation wraps and restarts the full five-second reading window.
+    // Models are fresh instances: rotating or disposing one cannot affect a ship.
     this.scan = (this.scan + direction + this.catalog.length) % this.catalog.length;
     this.scanTime = 0;
     if (this.previewObject) { this.previewScene.remove(this.previewObject); disposeObject(this.previewObject); }
@@ -109,17 +142,12 @@ export class GameUI {
     this.text('modelCount', `${this.scan + 1}/${this.catalog.length}`);
   }
   tick(dt: number): void {
-    if (this.overlay.hidden || !['title', 'briefing'].includes(this.screen)) return;
+    if (this.overlay.hidden || document.hidden) return;
+    if (this.screen === 'title' && this.demo) { this.demo.tick(dt); this.preview.render(this.demo.scene, this.demo.camera); return; }
+    if (!['objects', 'briefing'].includes(this.screen)) return;
     this.scanTime += dt;
     if (this.scanTime >= 5) this.changeScan(1);
     if (this.previewObject) this.previewObject.rotation.y += dt * 0.55;
     this.preview.render(this.previewScene, this.previewCamera);
   }
 }
-
-export const CONTROLS = `<section class="controls-card"><h2>CONTROLS</h2><dl class="control-grid">
-  <div><dt>MOUSE</dt><dd>Steer / aim</dd></div><div><dt>HOLD LEFT CLICK</dt><dd>Fire</dd></div>
-  <div><dt>RIGHT CLICK</dt><dd>Charged blast</dd></div><div><dt>WHEEL / W / S</dt><dd>Forward / stop / reverse</dd></div>
-  <div><dt>1 / 2 / 3</dt><dd>Pulse / Spread / Lance</dd></div><div><dt>TAB / WHEEL CLICK</dt><dd>Cycle weapon</dd></div>
-  <div><dt>HOLD WHEEL / ESC</dt><dd>Pause</dd></div><div><dt>LEFT / RIGHT</dt><dd>Browse object scan</dd></div>
-  </dl></section>`;

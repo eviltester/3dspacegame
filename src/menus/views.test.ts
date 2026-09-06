@@ -1,0 +1,51 @@
+import { describe, expect, it } from 'vitest';
+import { freshProfile, newRun, settleStage } from '../arcade';
+import { stageDefinition } from '../encounters';
+import { MenuViews } from './views';
+
+describe('menu views', () => {
+  it('offers a clean mouse-playable start and hides the test menu until unlocked', () => {
+    const profile = freshProfile();
+    const normal = MenuViews.title(profile, 'journey', 'pulse', false);
+    expect(normal[1]).toBe('3D VECTOR SPACE SHOOTER'); expect(normal[3]).toContain('PLAY GAME');
+    expect(normal[3]).toContain('data-action="controls"'); expect(normal[3]).not.toContain('control-grid'); expect(normal[3]).not.toContain('LEVEL WARP');
+    expect(MenuViews.title(profile, 'journey', 'pulse', true)[3]).toContain('LEVEL WARP');
+  });
+  it('shows only the selected mode checkpoint and record', () => {
+    const profile = freshProfile(); profile.checkpoints.endless = newRun('endless', 1); profile.checkpoints.endless.stage = 1000;
+    profile.records.endless = 700;
+    expect(MenuViews.title(profile, 'journey', 'pulse', false)[3]).not.toContain('RESUME');
+    const endless = MenuViews.title(profile, 'endless', 'pulse', false)[3];
+    expect(endless).toContain('RESUME WAVE 1000'); expect(endless).toContain('ATTACK CHALLENGE BEST 700');
+  });
+  it.each(['journey', 'endless'] as const)('explains locked and released armadas in %s', mode => {
+    const run = newRun(mode, 1); run.stage = 3; const definition = stageDefinition(mode, 3);
+    expect(MenuViews.briefing(run, definition)[3]).toContain('tractor beam');
+    expect(MenuViews.briefing(run, definition)[3]).toContain('LEFT / RIGHT');
+    settleStage(run);
+    expect(MenuViews.briefing(run, definition)[3]).toContain('beam is released');
+  });
+  it('keeps relaunch active throughout the countdown and changes to Continue at zero lives', () => {
+    const run = newRun('journey', 1);
+    const content = MenuViews.gameOver(run)[3]; expect(content).toContain('RELAUNCH NOW'); expect(content).not.toContain('disabled');
+    expect(content).toContain('id="deathTimer">10'); expect(content).not.toContain('System resetting');
+    run.lives = 0; expect(MenuViews.gameOver(run)[3]).toContain('CONTINUE');
+  });
+  it('shows progression locks and purchased family tiers without changing resources', () => {
+    const run = newRun('journey', 1); run.tiers.pulse = 2; run.phase = 'shop'; const before = structuredClone(run);
+    const content = MenuViews.shop(run)[3]; expect(content).toContain('PULSE 2'); expect(content).toContain('stage 5');
+    expect(run).toEqual(before);
+  });
+  it.each(['wasd', 'arrows'] as const)('uses %s instructions in the tractor-beam briefing', scheme => {
+    const run = newRun('journey', 1); run.stage = 3;
+    const view = MenuViews.briefing(run, stageDefinition('journey', 3), scheme)[3];
+    expect(view).not.toMatch(/mouse|click/i);
+    expect(view).toContain(scheme === 'wasd' ? 'Hold J to fire. K uses' : 'Hold Z to fire. X uses');
+  });
+  it('lists every stage and difficulty with practice-safe navigation', () => {
+    const content = MenuViews.levelWarp(null)[3];
+    expect(content).toContain('99.'); expect(content).toContain('MAXIMUM'); expect(content).toContain('warpBonus:canyon');
+    const run = newRun('journey', 1); run.practice = true;
+    expect(MenuViews.gameOver(run)[3]).toContain('CHOOSE LEVEL');
+  });
+});

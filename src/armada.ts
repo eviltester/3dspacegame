@@ -1,9 +1,12 @@
+/** Shared defensive-lane geometry for Journey armadas and the Invaders mode. */
 import * as THREE from 'three';
 
 export const ARMADA_LANE_LIMIT = 76;
 export const ARMADA_SALVAGE_SPEED = 24;
 
 export function configureArmadaCamera(camera: THREE.PerspectiveCamera): void {
+  // Look down the X/Z battle plane from above and behind the player. Pull back
+  // on narrow screens so the entire left/right lane remains in view.
   const focus = new THREE.Vector3(0, 0, -120);
   const fit = Math.max(1, 0.85 / camera.aspect);
   camera.position.set(0, 150, 95).sub(focus).multiplyScalar(fit).add(focus);
@@ -13,6 +16,8 @@ export function configureArmadaCamera(camera: THREE.PerspectiveCamera): void {
 }
 
 export function armadaFormationPosition(index: number, count: number): THREE.Vector3 {
+  // Centre each row separately, including an incomplete last row. Limit width
+  // so adding more enemies creates depth rather than unreachable outer columns.
   const columns = Math.min(6, Math.ceil(count / 2));
   const row = Math.floor(index / columns);
   const rowCount = Math.min(columns, count - row * columns);

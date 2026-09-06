@@ -1,3 +1,4 @@
+/** Hidden test-flight entry points, isolated from normal checkpoints and records. */
 import { bonusFor, JOURNEY_STAGE_COUNT, newRun } from './arcade';
 import type { BonusKind, GameMode, RunState, WeaponFamily } from './arcade';
 
@@ -24,6 +25,8 @@ export function createWarpRun(mode: GameMode, stage: number, family: WeaponFamil
   if (!Number.isSafeInteger(stage) || stage < 1 || (mode === 'journey' && stage > JOURNEY_STAGE_COUNT)) throw new RangeError('Invalid warp destination');
   if (bonus && (mode !== 'journey' || !bonusFor({ mode, stage }))) throw new RangeError('Invalid bonus destination');
   const run = newRun(mode, 0x1984, family);
+  // Use a fixed seed to reproduce test flights. Persistence/reward recorders honor
+  // practice, so exploring a late level cannot overwrite the player's real progress.
   run.stage = stage;
   run.practice = true;
   if (bonus) {

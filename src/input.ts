@@ -1,5 +1,8 @@
+/** Translate browser events into one common flight command for every control layout. */
 import * as THREE from 'three';
 import type { WeaponCommand } from './weapons';
+import { CONTROL_LAYOUTS, KEYBOARD_LOOK_RATE } from './input-layouts';
+import type { ControlScheme } from './input-layouts';
 
 export const MIN_THROTTLE = -90;
 export const MAX_THROTTLE = 180;
@@ -26,6 +29,7 @@ export function throttleReadout(throttle: number): string {
 export class FlightInput {
   active = false;
   firing = false;
+  // Remember a quick tap even if mouseup happens before the next simulation tick.
   private firePressed = false;
   throttle = 65;
   autoFlight = false;
@@ -33,6 +37,7 @@ export class FlightInput {
   private dx = 0;
   private dy = 0;
   private fallback = false;
+  private scheme: ControlScheme = 'mouse';
   private keys = new Set<string>();
   private middlePressed = false;
   private middleHold: ReturnType<typeof setTimeout> | null = null;
@@ -43,6 +48,8 @@ export class FlightInput {
       event.preventDefault();
       if (event.button === 0) { this.firing = true; this.firePressed = true; }
       if (event.button === 1 && !this.middlePressed) {
+        // A short middle click cycles weapons; a long hold pauses. Clear the press
+        // when the hold fires so releasing the button cannot perform both actions.
         this.middlePressed = true;
         this.middleHold = setTimeout(() => {
           this.middleHold = null;
@@ -61,7 +68,7 @@ export class FlightInput {
       }
     });
     window.addEventListener('mousemove', event => {
-      if (this.active && (document.pointerLockElement === canvas || this.fallback)) {
+      if (this.active && this.scheme === 'mouse' && (document.pointerLockElement === canvas || this.fallback)) {
         this.dx += event.movementX;
         this.dy += event.movementY;
       }
@@ -73,32 +80,42 @@ export class FlightInput {
       else this.throttle = wheelThrottle(this.throttle, event.deltaY);
     }, { passive: false });
     window.addEventListener('keydown', event => {
-      if (!this.active) return;
+      if (!this.active || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
       const weapon = weaponKey(event.code);
-      if (weapon && !event.ctrlKey && !event.altKey && !event.metaKey && !event.isComposing) {
+      if (weapon) {
         event.preventDefault();
         if (!event.repeat) this.weapon(weapon);
         return;
       }
-      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
+      const layout = CONTROL_LAYOUTS[this.scheme];
+      const bindings = [layout.up, layout.down, layout.left, layout.right, layout.primary, layout.special, layout.accelerate, layout.brake, layout.rollLeft, layout.rollRight];
+      if (!bindings.some(codes => codes.includes(event.code)) && !['Escape', 'ShiftLeft', 'ShiftRight'].includes(event.code)) return;
+      event.preventDefault();
       this.keys.add(event.code);
-      if (event.code === 'Escape') this.pause();
+      if (layout.primary.includes(event.code) && !event.repeat) this.firePressed = true;
+      if (layout.special.includes(event.code) && !event.repeat) this.special();
+      if (event.code === 'Escape' && !event.repeat) this.pause();
     });
     window.addEventListener('keyup', event => this.keys.delete(event.code));
     window.addEventListener('blur', () => { if (this.active) this.pause(); });
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.active) this.pause(); });
     document.addEventListener('pointerlockchange', () => {
-      if (!document.pointerLockElement && this.active && !this.fallback) this.pause();
+      if (!document.pointerLockElement && this.active && this.scheme === 'mouse' && !this.fallback) this.pause();
     });
   }
+  setScheme(scheme: ControlScheme): void { this.clear(); this.scheme = scheme; }
   async engage(): Promise<void> {
     this.clear();
     this.active = true;
     this.fallback = false;
+    if (this.scheme !== 'mouse') return;
+    // Keyboard flight needs no lock. Some embedded browsers refuse pointer lock;
+    // retain a best-effort mouse fallback instead of making launch fail entirely.
     try { if (document.pointerLockElement !== this.canvas) await this.canvas.requestPointerLock(); }
     catch { this.fallback = true; }
   }
   release(): void {
+    // Mark inactive before exiting lock so pointerlockchange cannot pause recursively.
     this.active = false;
     this.clear();
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
@@ -109,16 +126,22 @@ export class FlightInput {
   }
   clear(): void { this.firing = false; this.firePressed = false; this.dx = 0; this.dy = 0; this.wheelBoost = 0; this.keys.clear(); this.clearMiddle(); }
   consumeFire(): boolean {
-    const requested = this.active && (this.firing || this.firePressed || this.keys.has('Space'));
+    const requested = this.active && (this.firing || this.firePressed || this.held(CONTROL_LAYOUTS[this.scheme].primary));
     this.firePressed = false;
     return requested;
   }
+  private held(codes: readonly string[]): boolean { return codes.some(code => this.keys.has(code)); }
   consume(dt: number): { x: number; y: number; roll: number; speed: number; boost: boolean } {
-    if (!this.autoFlight && (this.keys.has('KeyW') || this.keys.has('ArrowUp'))) this.throttle = Math.min(MAX_THROTTLE, this.throttle + dt * 80);
-    if (!this.autoFlight && (this.keys.has('KeyS') || this.keys.has('ArrowDown'))) this.throttle = Math.max(MIN_THROTTLE, this.throttle - dt * 100);
+    // Mouse input is already a displacement; held keys are rates multiplied by dt.
+    // Only transient deltas are consumed. The selected throttle is deliberately kept.
+    const layout = CONTROL_LAYOUTS[this.scheme];
+    if (!this.autoFlight && this.held(layout.accelerate)) this.throttle = Math.min(MAX_THROTTLE, this.throttle + dt * 80);
+    if (!this.autoFlight && this.held(layout.brake)) this.throttle = Math.max(MIN_THROTTLE, this.throttle - dt * 100);
     const boost = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || (this.autoFlight && this.wheelBoost > 0);
     this.wheelBoost = Math.max(0, this.wheelBoost - dt);
-    const value = { x: this.dx, y: this.dy, roll: (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0) - (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0),
+    const value = { x: this.dx + (Number(this.held(layout.right)) - Number(this.held(layout.left))) * KEYBOARD_LOOK_RATE * dt,
+      y: this.dy + (Number(this.held(layout.down)) - Number(this.held(layout.up))) * KEYBOARD_LOOK_RATE * dt,
+      roll: Number(this.held(layout.rollLeft)) - Number(this.held(layout.rollRight)),
       speed: boost ? (this.throttle < 0 && !this.autoFlight ? -130 : 230) : this.throttle, boost };
     this.dx = 0;
     this.dy = 0;
@@ -128,5 +151,7 @@ export class FlightInput {
 }
 
 export function rotateLocally(rotation: THREE.Quaternion, x: number, y: number, roll: number, dt: number): void {
+  // Post-multiply by a local rotation instead of clamping global pitch/yaw angles.
+  // Up/down can continue through a full loop, even after the player has rolled.
   rotation.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-y * 0.0022, -x * 0.0022, roll * dt * 1.4, 'YXZ'))).normalize();
 }

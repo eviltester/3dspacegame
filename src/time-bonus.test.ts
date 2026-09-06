@@ -109,8 +109,8 @@ describe('time bonus persistence', () => {
   it('migrates older v2 saves without paying bonuses for gates already passed', () => {
     const profile = freshProfile(), run = newRun('journey', 1);
     run.elapsed = 37; settleStage(run); profile.checkpoints.journey = run;
-    const old = JSON.parse(JSON.stringify(profile));
-    delete old.checkpoints.journey.timeRemaining; delete old.checkpoints.journey.timeBonus;
+    const { timeRemaining: _time, timeBonus: _bonus, ...legacyRun } = run;
+    const old = { ...profile, checkpoints: { journey: legacyRun } };
     const pending = parseProfile(JSON.stringify(old), null).checkpoints.journey!;
     expect(pending.timeRemaining).toBe(83); expect(pending.timeBonus).toBeNull();
     old.checkpoints.journey.phase = 'shop';
@@ -120,7 +120,7 @@ describe('time bonus persistence', () => {
 
   it.each([-1, 121, '90', null])('rejects invalid remaining time %s', timeRemaining => {
     const profile = freshProfile(); profile.checkpoints.journey = newRun('journey', 1);
-    const invalid = JSON.parse(JSON.stringify(profile)); invalid.checkpoints.journey.timeRemaining = timeRemaining;
+    const invalid = { ...profile, checkpoints: { journey: { ...profile.checkpoints.journey, timeRemaining } } };
     expect(parseProfile(JSON.stringify(invalid), null).checkpoints.journey).toBeUndefined();
   });
 });

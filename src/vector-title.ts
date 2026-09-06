@@ -1,4 +1,6 @@
 // Single-stroke lettering, drawn with the same straight-line vocabulary as the ships.
+// Each glyph is a list of pen strokes; a stroke stores x,y pairs on a 4-by-7 grid.
+// Missing glyphs leave a blank advance. Add lettering here rather than a font asset.
 const GLYPHS: Record<string, number[][]> = {
   A: [[0, 7, 0, 2, 2, 0, 4, 2, 4, 7], [0, 4, 4, 4]],
   B: [[0, 7, 0, 0, 3, 0, 4, 1, 4, 2.5, 3, 3.5, 0, 3.5], [3, 3.5, 4, 4.5, 4, 6, 3, 7, 0, 7]],
@@ -26,8 +28,25 @@ const GLYPHS: Record<string, number[][]> = {
   X: [[0, 0, 4, 7], [4, 0, 0, 7]],
   Y: [[0, 0, 2, 3.5, 4, 0], [2, 3.5, 2, 7]],
   Z: [[0, 0, 4, 0, 0, 7, 4, 7]],
-  '-': [[0, 3.5, 4, 3.5]]
+  '-': [[0, 3.5, 4, 3.5]],
+  '3': [[0, 0, 3, 0, 4, 1, 4, 2.5, 3, 3.5, 1, 3.5], [3, 3.5, 4, 4.5, 4, 6, 3, 7, 0, 7]],
+  '&': [[4, 7, 0, 2, 0, 1, 1, 0, 2, 0, 3, 1, 3, 2, 0, 5, 0, 6, 1, 7, 2, 7, 4, 4]]
 };
+
+export function vectorTitleLines(text: string, width: number): string[] {
+  // On compact panels, choose the word boundary with the shortest longest line.
+  // Balancing two lines avoids one enormous word forcing the entire title tiny.
+  const words = text.split(' ');
+  if (width >= 500 || text.length <= 10 || words.length < 2) return [text];
+  let lines = [text];
+  let longest = text.length;
+  for (let split = 1; split < words.length; split++) {
+    const candidate = [words.slice(0, split).join(' '), words.slice(split).join(' ')];
+    const length = Math.max(...candidate.map(line => line.length));
+    if (length < longest) { lines = candidate; longest = length; }
+  }
+  return lines;
+}
 
 export function drawVectorTitle(canvas: HTMLCanvasElement, text: string, color: string): void {
   const context = canvas.getContext('2d');
@@ -35,18 +54,21 @@ export function drawVectorTitle(canvas: HTMLCanvasElement, text: string, color: 
   const width = canvas.clientWidth || 700;
   const height = canvas.clientHeight || 96;
   const pixelRatio = Math.min(window.devicePixelRatio, 2);
+  // Backing pixels follow display density, while drawing coordinates stay in CSS
+  // pixels. Cap density to avoid wasting work on a small decorative title canvas.
   canvas.width = Math.round(width * pixelRatio);
   canvas.height = Math.round(height * pixelRatio);
   context.scale(pixelRatio, pixelRatio);
-  const lines = width < 500 && text.length > 10 ? text.split(' ') : [text];
+  const lines = vectorTitleLines(text, width);
   const lineHeight = height / lines.length;
+  const longest = Math.max(4, ...lines.map(line => line.length * 6 - 2));
+  const scale = Math.min((width - 16) / longest, (lineHeight - 14) / 7, 9);
   context.strokeStyle = color;
   context.lineWidth = 1.5;
   context.lineCap = 'square';
   context.lineJoin = 'bevel';
   lines.forEach((line, row) => {
     const units = Math.max(4, line.length * 6 - 2);
-    const scale = Math.min((width - 16) / units, (lineHeight - 14) / 7, 9);
     const left = (width - units * scale) / 2;
     const top = row * lineHeight + (lineHeight - 7 * scale) / 2;
     [...line].forEach((character, index) => {
