@@ -1,308 +1,221 @@
-import { mkdir } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 
 const url = process.env.SMOKE_URL ?? 'http://127.0.0.1:5173/';
-const outputDir = 'output/playwright';
-
-await mkdir(outputDir, { recursive: true });
-
+const out = 'output/playwright';
+await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-const runtimeErrors = [];
-
-page.on('console', (message) => {
-  if (message.type() === 'error') {
-    runtimeErrors.push(message.text());
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+const errors = [];
+const report = { journeys: [], bonuses: [], checks: [], errors };
+page.on('pageerror', e => errors.push(e.message));
+page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+const state = () => page.evaluate(() => window.vectorShooterDebug.getState());
+const action = name => page.locator('[data-action="' + name + '"]').click();
+const step = n => page.evaluate(n => window.vectorShooterDebug.step(n), n);
+const snapshot = async name => {
+ const buffer = await page.screenshot({ path: out + '/' + name + '.png' });
+ const png = PNG.sync.read(buffer);
+ let lit = 0;
+ for (let i = 0; i < png.data.length; i += 4) if (Math.max(png.data[i], png.data[i + 1], png.data[i + 2]) > 60) lit++;
+ assert(lit > 800, name + ' is blank');
+ return png;
+};
+const launch = async () => { await action('launch'); await page.waitForTimeout(90); };
+const finish = async () => { await page.evaluate(() => window.vectorShooterDebug.finishEncounter()); await page.waitForTimeout(60); };
+const warp = async () => { await page.evaluate(() => window.vectorShooterDebug.reachGate()); await step(2.2); await page.waitForTimeout(80); };
+const layout = async () => {
+ const result = await page.evaluate(() => {
+  const overlay = document.querySelector('#launchOverlay');
+  const root = overlay.hidden ? document.querySelector('.hud') : overlay;
+  const overflow = [...root.querySelectorAll('button, dt, dd, h2, .model-copy p')].filter(el => {
+   if (!el.getClientRects().length) return false;
+   return el.scrollWidth > el.clientWidth + 2;
+  }).map(el => el.textContent);
+  const selectors = '.hud-panel,.radar,.bottom-strip,.message-log,.arcade-strip,.flight-buttons,#objectiveArrow,#threatArrow,#hitCallout';
+  const boxes = overlay.hidden ? [...document.querySelectorAll(selectors)].filter(el => el.getClientRects().length && getComputedStyle(el).opacity !== '0').map(el => ({ id: el.id || el.className, rect: el.getBoundingClientRect() })) : [];
+  const overlaps = [];
+  for(let i=0;i<boxes.length;i++)for(let j=i+1;j<boxes.length;j++){
+   const a=boxes[i].rect,b=boxes[j].rect;
+   if(Math.min(a.right,b.right)-Math.max(a.left,b.left)>2 && Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>2)overlaps.push(boxes[i].id+' / '+boxes[j].id);
   }
-});
-page.on('pageerror', (error) => runtimeErrors.push(error.message));
-
+  return { overflow, overlaps, wide: root.scrollWidth > innerWidth + 2 };
+ });
+ assert.deepEqual(result, { overflow: [], overlaps: [], wide: false });
+};
 try {
-  await page.addInitScript(() =>
-    window.localStorage.setItem(
-      'vector-shooter-save-v1',
-      JSON.stringify({
-        credits: 100,
-        bestScore: 0,
-        discoveredSectors: ['lyra-drift'],
-        sectorReputation: { 'lyra-drift': 'pirate' },
-        wantedBySector: { 'lyra-drift': 3 },
-        unlockedWeaponLevel: 1
-      })
-    )
-  );
-  await page.goto(url, { waitUntil: 'networkidle' });
-  await page.waitForSelector('#viewport canvas');
-  await page.waitForSelector('#modelPreview canvas');
-  await page.waitForFunction(() => window.vectorShooterDebug);
+ await page.addInitScript(() => {
+  localStorage.setItem('vector-shooter-save-v1', JSON.stringify({ credits: 9999, bestScore: 1200, unlockedWeaponLevel: 3, wantedBySector: { old: 4 } }));
+  const OriginalAudioContext = window.AudioContext;
+  window.__audioContexts = [];
+  window.AudioContext = class extends OriginalAudioContext { constructor(...args) { super(...args); window.__audioContexts.push(this); } };
+ });
+ await page.goto(url);
+ await page.waitForFunction(() => window.vectorShooterDebug);
+ await snapshot('arcade-title'); await layout();
+ const initialScan = (await state()).briefingCount;
+ await action('scanNext'); assert.notEqual((await state()).briefingCount, initialScan);
+ await action('scanPrevious'); assert.equal((await state()).briefingCount, initialScan);
+ await page.waitForTimeout(5100); assert.notEqual((await state()).briefingCount, initialScan);
+ await action('newRun'); await launch();
+ assert.equal((await state()).wanted, false); assert.equal((await state()).credits, 0);
+ for(let i=0;i<5;i++)await page.mouse.wheel(0,100);
+ await page.mouse.move(720,450);
+ const before = (await state()).orientation;
+ await page.mouse.move(760,465); await step(.1);
+ assert.notDeepEqual((await state()).orientation, before);
+ await page.evaluate(() => window.vectorShooterDebug.spawnIncomingBolt());
+ await page.mouse.down(); await step(.6); await page.mouse.up();
+ assert((await state()).stats.shots > 0);
+ assert((await state()).stats.interceptions > 0);
+ const p1 = await snapshot('combat-pulse');
+ await page.waitForTimeout(200);
+ const p2 = await snapshot('combat-motion');
+ let changed=0;for(let i=0;i<p1.data.length;i+=4)if(p1.data[i]!==p2.data[i]||p1.data[i+1]!==p2.data[i+1]||p1.data[i+2]!==p2.data[i+2])changed++;
+ assert(changed>300,'canvas is not animated');
+ const friends = (await state()).actors.filter(a => a.kind === 'police' || a.kind === 'trader').map(a => [a.id,a.hull]);
+ await page.evaluate(() => { window.vectorShooterDebug.primeBlast(); window.vectorShooterDebug.blast(); });
+ assert.equal((await state()).wanted, false);
+ for(const [id,hull] of friends)assert.equal((await state()).actors.find(a=>a.id===id).hull,hull);
+ await page.mouse.click(720,450,{button:'middle'}); assert.equal((await state()).menu,'pause');
+ const frozen=(await state()).elapsed; await step(10); assert.equal((await state()).elapsed,frozen);
+ await action('unpause'); await page.waitForTimeout(100);
+ await page.evaluate(()=>window.dispatchEvent(new Event('blur'))); assert.equal((await state()).menu,'pause');
+ await action('unpause'); await page.waitForTimeout(100);
+ await page.evaluate(()=>document.exitPointerLock()); await page.waitForTimeout(100);
+ assert.equal((await state()).menu,'pause');
+ await action('unpause'); await page.waitForTimeout(100);
+ const audio = await page.evaluate(()=>window.__audioContexts.map(c=>c.state));
+ assert(audio.includes('running'));
+ report.checks.push('mouse fire, steering, wheel, interception, friendly blast safety, mouse pause, blur and pointer-lock pause, audio');
 
-  const briefing = await page.evaluate(() => ({
-    title: document.querySelector('#launchTitle')?.textContent ?? '',
-    launchButton: document.querySelector('#launchButton')?.textContent ?? '',
-    controls: document.querySelector('.controls-card')?.textContent ?? '',
-    modelTitle: window.vectorShooterDebug.getState().briefingTitle,
-    modelCount: window.vectorShooterDebug.getState().briefingCount,
-    missionBriefTitle: window.vectorShooterDebug.getState().missionBriefTitle,
-    missionBriefObjective: window.vectorShooterDebug.getState().missionBriefObjective
-  }));
-  if (
-    briefing.title !== 'VECTOR SHOOTER' ||
-    briefing.launchButton !== 'PLAY GAME' ||
-    !briefing.controls.includes('LEFT CLICK') ||
-    !briefing.controls.includes('W / UP') ||
-    !briefing.controls.includes('LEFT / RIGHT') ||
-    !briefing.modelTitle ||
-    !/^\d+\/\d+$/.test(briefing.modelCount) ||
-    !briefing.missionBriefTitle ||
-    !briefing.missionBriefObjective
-  ) {
-    throw new Error(`Briefing screen missing expected controls or model scan: ${JSON.stringify(briefing)}`);
+ for(let death=0;death<3;death++){
+  await page.evaluate(()=>window.vectorShooterDebug.forcePlayerDeath());
+  assert.equal((await state()).lives,2-death);
+  assert.equal((await state()).menu,'gameover');
+  if(death===0)await snapshot('relaunch');
+  await action('relaunch'); await page.waitForTimeout(100);
+ }
+ assert.equal((await state()).continued,true);assert.equal((await state()).lives,3);assert.equal((await state()).score,0);
+ await page.evaluate(()=>window.vectorShooterDebug.forcePlayerDeath());
+ await page.waitForTimeout(10300);
+ assert.equal((await state()).menu,'title');
+ await action('resumeRun');assert.equal((await state()).menu,'gameover');assert.equal((await state()).lives,2);
+ await action('relaunch');await page.waitForTimeout(100);
+ report.checks.push('death rollback, immediate relaunch and unlimited continue');
+
+ for(let n=1;n<=12;n++){
+  assert.equal((await state()).stage,n);
+  if(n===3){
+   const before=(await state()).position;
+   await page.mouse.move(810,520);await step(.3);
+   const after=(await state()).position;
+   assert.equal(after[1],0);assert.equal(after[2],0);assert.notEqual(after[0],before[0]);
+   await snapshot('armada');
   }
-
-  const launchLaw = await page.evaluate(() => window.vectorShooterDebug.getState());
-  if (launchLaw.wantedHere || launchLaw.wanted) {
-    throw new Error(`Saved heat was not cleared on launch: wanted=${launchLaw.wanted}, wantedHere=${launchLaw.wantedHere}`);
+  if([4,8,12].includes(n)){
+   await step(.1);
+   const s=await state(), carrier=s.actors.find(a=>a.kind==='pirate'&&a.role==='carrier');
+   assert(carrier);
+   await page.evaluate(id=>window.vectorShooterDebug.hitActor(id,9999),carrier.id);
+   assert.equal((await state()).actors.find(a=>a.id===carrier.id).hull,carrier.hull);
+   await snapshot('carrier-'+n);
   }
-
-  await page.keyboard.press('ArrowRight');
-  await page.waitForFunction(
-    (firstTitle) => window.vectorShooterDebug.getState().briefingTitle !== firstTitle,
-    briefing.modelTitle,
-    { timeout: 1000 }
-  );
-  const nextBriefing = await page.evaluate(() => window.vectorShooterDebug.getState());
-  if (nextBriefing.briefingCount === briefing.modelCount) {
-    throw new Error(`Briefing arrow navigation did not update the count: ${briefing.modelCount}`);
+  await finish();
+  assert.match(await page.locator('#missionProgress').innerText(),/WARP/);
+  const reward=(await state()).credits;
+  await finish();assert.equal((await state()).credits,reward);
+  await warp();
+  if(n===12){assert.equal((await state()).menu,'victory');break;}
+  if([3,7,11].includes(n)){
+   assert.equal((await state()).menu,'bonusOffer');
+   const main=await state();
+   await action('bonusPlay');await page.waitForTimeout(100);await step(2);
+   await snapshot('bonus-'+n);
+   assert((await state()).bonus);
+   await page.mouse.click(720,450,{button:'right'});
+   assert.equal((await state()).menu,'bonusResult');
+   assert.equal((await state()).lives,main.lives);assert.equal((await state()).hull,main.hull);
+   assert.equal((await state()).shield,main.shield);assert.deepEqual((await state()).tiers,main.tiers);
+   await action('bonusDock');
   }
-
-  await page.keyboard.press('ArrowLeft');
-  await page.waitForFunction(
-    (firstTitle) => window.vectorShooterDebug.getState().briefingTitle === firstTitle,
-    briefing.modelTitle,
-    { timeout: 1000 }
-  );
-  await page.waitForTimeout(3600);
-  const stillBriefingTitle = await page.evaluate(() => window.vectorShooterDebug.getState().briefingTitle);
-  if (stillBriefingTitle !== briefing.modelTitle) {
-    throw new Error('Briefing scan advanced before the 5 second delay');
+  assert.equal((await state()).menu,'shop');
+  if(n===1){
+   await action('equip:spread');
+   await page.evaluate(()=>window.vectorShooterDebug.giveCredits(400));
+   await action('buy:tier'); assert.equal((await state()).tiers.spread,2);
+   await snapshot('shop');
+   await action('title'); await page.reload(); await action('resumeRun');
+   assert.equal((await state()).menu,'shop'); assert.equal((await state()).tiers.spread,2);
   }
-  await page.waitForFunction(
-    (firstTitle) => window.vectorShooterDebug.getState().briefingTitle !== firstTitle,
-    briefing.modelTitle,
-    { timeout: 2500 }
-  );
-
-  await page.click('#launchButton');
-  await page.evaluate(() => window.vectorShooterDebug.lookByMouse(0, 1800));
-  const loopPitch = await page.evaluate(() => window.vectorShooterDebug.getState().pitch);
-  if (loopPitch > -2.2) {
-    throw new Error(`Mouse pitch still appears clamped: pitch=${loopPitch}`);
+  await action('depart');await launch();
+  report.journeys.push({mode:'journey',stage:n,verified:'briefing, encounter settlement, warp, dock'});
+ }
+ await snapshot('journey-victory');
+ await action('title');await action('mode:endless');await action('newRun');await launch();
+ for(let n=1;n<=10;n++){
+  assert.equal((await state()).stage,n);await finish();
+  if(n%5){
+   assert.equal((await state()).phase,'recovery');
+   await page.mouse.click(720,450);await page.waitForTimeout(100);
+   assert.equal((await state()).stage,n+1);
+  }else{
+   await warp();assert.equal((await state()).menu,'bonusOffer');
+   if(n===5){
+    await action('bonusPlay');await page.waitForTimeout(100);
+    await page.evaluate(()=>window.vectorShooterDebug.finishBonus('crash'));
+    assert.equal((await state()).lives,3);
+    await action('bonusDock');
+   }else await action('bonusSkip');
+   await action('equip:lance');
+   await snapshot('endless-dock-'+n);
+   await action('depart');await launch();
   }
-  await page.evaluate(() => window.vectorShooterDebug.lookByMouse(0, -1800));
+  report.journeys.push({mode:'endless',stage:n,verified:'wave, recovery / boss dock and bonus'});
+ }
+ await page.mouse.click(720,450,{button:'middle'});
+ await action('title'); await page.reload();
+ await action('mode:journey');
+ assert.match(await page.locator('.record-line').innerText(),/CONTINUED/);
+ await action('mode:endless');await action('resumeRun');await launch();
+ assert.equal((await state()).stage,11);
+ assert.equal((await state()).weapon,'lance');
+ report.checks.push('twelve Journey stages, ten Endless waves, separate resumes, bonus isolation and single payouts');
 
-  await page.evaluate(() => window.vectorShooterDebug.hitNearestPirate());
-  const lawAfterPirateHit = await page.evaluate(() => window.vectorShooterDebug.getState());
-  if (lawAfterPirateHit.wantedHere) {
-    throw new Error(`Pirate defense incorrectly triggered a warrant: wantedHere=${lawAfterPirateHit.wantedHere}`);
+ const bonusChecks = await page.evaluate(async () => {
+  const { BonusController }=await import('/src/bonus.ts');
+  const THREE=await import('/node_modules/.vite/deps/three.js');
+  const result=[];
+  for(const kind of ['asteroids','canyon','sequence']){
+   for(const reason of ['complete','crash','timeout','exit']){
+    const b=new BonusController(kind,41),c=new THREE.PerspectiveCamera(68,1,.1,6000);
+    if(reason==='timeout') for(let i=0;i<4600&&!b.state.finished;i++)b.step(1/60,{x:0,y:0},c);
+    else if(reason==='crash'&&kind==='canyon')for(let i=0;i<260&&!b.state.finished;i++)b.step(1/60,{x:300,y:0},c);
+    else b.finish(reason);
+    if(!b.state.finished)throw new Error(kind+' '+reason+' did not exit');
+    const ratio=b.ratio;b.finish('exit');if(b.ratio!==ratio)throw new Error('double exit changed result');
+    result.push({kind,requested:reason,actual:b.state.reason,health:b.state.health,ratio});b.dispose();
+   }
   }
-  const npcShipHitsBefore = lawAfterPirateHit.npcShipHits;
-  await page.evaluate(() => window.vectorShooterDebug.forceNpcCrossfire());
-  await page.waitForFunction(
-    (previousCount) => window.vectorShooterDebug.getState().npcShipHits > previousCount,
-    npcShipHitsBefore,
-    { timeout: 2500 }
-  );
-  const lawAfterNpcCrossfire = await page.evaluate(() => window.vectorShooterDebug.getState());
-  if (lawAfterNpcCrossfire.wantedHere) {
-    throw new Error('NPC crossfire incorrectly made the player wanted');
-  }
-  const pirateTookContraband = await page.evaluate(() => window.vectorShooterDebug.forceNpcPickup('pirate', 'contraband'));
-  if (!pirateTookContraband) {
-    throw new Error('Pirate failed to pick up contraband');
-  }
-  const policeTookContraband = await page.evaluate(() => window.vectorShooterDebug.forceNpcPickup('police', 'contraband'));
-  if (!policeTookContraband) {
-    throw new Error('Police failed to pick up contraband');
-  }
-  const policeTookLegalCargo = await page.evaluate(() => window.vectorShooterDebug.forceNpcPickup('police', 'legalCargo'));
-  if (policeTookLegalCargo) {
-    throw new Error('Police incorrectly picked up legal cargo');
-  }
-  const policeTookWeaponCore = await page.evaluate(() => window.vectorShooterDebug.forceNpcPickup('police', 'weaponCore'));
-  if (policeTookWeaponCore) {
-    throw new Error('Police incorrectly picked up a weapon core');
-  }
-  const traderTookContraband = await page.evaluate(() => window.vectorShooterDebug.forceNpcPickup('trader', 'contraband'));
-  if (traderTookContraband) {
-    throw new Error('Trader incorrectly picked up contraband');
-  }
-  const traderTookLegalCargo = await page.evaluate(() => window.vectorShooterDebug.forceNpcPickup('trader', 'legalCargo'));
-  if (!traderTookLegalCargo) {
-    throw new Error('Trader failed to pick up legal cargo');
-  }
-
-  await page.evaluate(() => window.vectorShooterDebug.completeActiveMission());
-  await page.waitForFunction(
-    () =>
-      window.vectorShooterDebug.getState().messageLog.includes('Head to the Warp Gate!') &&
-      window.vectorShooterDebug.getState().warpCueFlashing,
-    undefined,
-    { timeout: 1200 }
-  );
-
-  const shieldBeforeHit = await page.evaluate(() => window.vectorShooterDebug.getState().shield);
-  await page.evaluate(() => window.vectorShooterDebug.forcePirateHit());
-  await page.waitForFunction(
-    () =>
-      document.querySelector('#damageLayer')?.classList.contains('active') &&
-      window.vectorShooterDebug.getState().hitCallout.includes('RED PIRATE SHOT YOU'),
-    undefined,
-    { timeout: 1200 }
-  );
-  const shieldAfterHit = await page.evaluate(() => window.vectorShooterDebug.getState().shield);
-  if (shieldAfterHit >= shieldBeforeHit) {
-    throw new Error(`Pirate-hit feedback did not apply damage; shield ${shieldBeforeHit} -> ${shieldAfterHit}`);
-  }
-  const planetDistance = await page.evaluate(() => {
-    window.vectorShooterDebug.ramNearestPlanet();
-    return window.vectorShooterDebug.getState().nearestPlanetDistance;
-  });
-  if (planetDistance === null || planetDistance < 61.5) {
-    throw new Error(`Planet collision failed; distance after collision was ${planetDistance}`);
-  }
-  await page.keyboard.down('KeyW');
-  await page.mouse.move(720, 320);
-  await page.waitForTimeout(420);
-  await page.keyboard.up('KeyW');
-  await page.mouse.click(640, 360);
-  await page.waitForFunction(() => window.vectorShooterDebug.getState().playerShots > 0, undefined, { timeout: 2000 });
-  await page.waitForTimeout(300);
-
-  const shotInterceptionsBefore = await page.evaluate(() => window.vectorShooterDebug.getState().shotInterceptions);
-  await page.waitForTimeout(450);
-  await page.evaluate(() => window.vectorShooterDebug.spawnIncomingBolt());
-  await page.mouse.click(640, 360);
-  await page.waitForFunction(
-    (previousCount) => window.vectorShooterDebug.getState().shotInterceptions > previousCount,
-    shotInterceptionsBefore,
-    { timeout: 3000 }
-  );
-
-  await assertNonBlank(page, `${outputDir}/desktop.png`);
-  await assertNoHudOverlap(page, 'desktop');
-
-  await page.evaluate(() => window.vectorShooterDebug.grantCargo('credits', 2));
-  await page.evaluate(() => window.vectorShooterDebug.triggerTraderAttack());
-  await page.waitForFunction(() => window.vectorShooterDebug.getState().wanted === true);
-
-  const beforeWarp = await page.evaluate(() => window.vectorShooterDebug.getState().sector);
-  await page.evaluate(() => window.vectorShooterDebug.triggerWarp());
-  await page.waitForFunction((sector) => window.vectorShooterDebug.getState().sector !== sector, beforeWarp, {
-    timeout: 4000
-  });
-  await page.waitForFunction(
-    () =>
-      document.querySelector('#launchOverlay')?.getAttribute('data-mode') === 'mission' &&
-      window.vectorShooterDebug.getState().missionBriefObjective.length > 0 &&
-      document.querySelector('#launchButton')?.textContent === 'START MISSION',
-    undefined,
-    { timeout: 1200 }
-  );
-  await page.click('#launchButton');
-  await page.waitForFunction(() => document.querySelector('#launchOverlay')?.classList.contains('hidden'), undefined, {
-    timeout: 1200
-  });
-
-  await page.setViewportSize({ width: 390, height: 740 });
-  await page.waitForTimeout(300);
-  await assertNonBlank(page, `${outputDir}/mobile.png`);
-  await assertNoHudOverlap(page, 'mobile');
-
-  await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath());
-  await page.waitForFunction(
-    () =>
-      document.querySelector('#launchOverlay')?.getAttribute('data-mode') === 'death' &&
-      window.vectorShooterDebug.getState().deathTimer === '10' &&
-      document.querySelector('#launchButton')?.textContent === 'RELAUNCH NOW' &&
-      !document.querySelector('#launchButton')?.disabled,
-    undefined,
-    { timeout: 1200 }
-  );
-  await page.waitForFunction(() => window.vectorShooterDebug.getState().deathTimer === '9', undefined, {
-    timeout: 1700
-  });
-  await page.click('#launchButton');
-  await page.waitForFunction(
-    () =>
-      document.querySelector('#launchOverlay')?.classList.contains('hidden') &&
-      window.vectorShooterDebug.getState().deathTimer === '10' &&
-      !window.vectorShooterDebug.getState().wantedHere,
-    undefined,
-    { timeout: 1200 }
-  );
-
-  if (runtimeErrors.length > 0) {
-    throw new Error(`Browser reported errors:\n${runtimeErrors.join('\n')}`);
-  }
-
-  const state = await page.evaluate(() => window.vectorShooterDebug.getState());
-  console.log(
-    `Smoke passed: sector=${state.sector}, entities=${state.entityCount}, wanted=${state.wanted}, weapon=${state.weaponLevel}`
-  );
-} finally {
-  await browser.close();
-}
-
-async function assertNonBlank(targetPage, path) {
-  const screenshot = await targetPage.screenshot({ path });
-  const png = PNG.sync.read(screenshot);
-  let litPixels = 0;
-  for (let index = 0; index < png.data.length; index += 4) {
-    const red = png.data[index];
-    const green = png.data[index + 1];
-    const blue = png.data[index + 2];
-    if (red + green + blue > 45) {
-      litPixels += 1;
-    }
-  }
-
-  const ratio = litPixels / (png.width * png.height);
-  if (ratio < 0.015) {
-    throw new Error(`Canvas/render check failed for ${path}; lit pixel ratio was ${ratio.toFixed(4)}`);
-  }
-}
-
-async function assertNoHudOverlap(targetPage, label) {
-  const overlaps = await targetPage.evaluate(() => {
-    const selectors = ['.sector-panel', '.mission-panel', '.cargo-panel', '.radar', '.bottom-strip'];
-    const boxes = selectors.map((selector) => {
-      const element = document.querySelector(selector);
-      const rect = element.getBoundingClientRect();
-      return {
-        selector,
-        left: rect.left,
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom
-      };
-    });
-
-    const result = [];
-    for (let outer = 0; outer < boxes.length; outer += 1) {
-      for (let inner = outer + 1; inner < boxes.length; inner += 1) {
-        const a = boxes[outer];
-        const b = boxes[inner];
-        const separated = a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top;
-        if (!separated) {
-          result.push(`${a.selector} overlaps ${b.selector}`);
-        }
-      }
-    }
-    return result;
-  });
-
-  if (overlaps.length > 0) {
-    throw new Error(`HUD overlap at ${label}: ${overlaps.join(', ')}`);
-  }
-}
+  const b=new BonusController('sequence',41),c=new THREE.PerspectiveCamera(68,1,.1,6000);
+  c.lookAt(16.5,40.5,-206);b.shoot(c);
+  if(b.state.remaining!==58||b.state.nextMarker!==1)throw new Error('wrong marker penalty');
+  for(let i=0;i<16;i++){c.lookAt((i%4-1.5)*33,(1.5-Math.floor(i/4))*27,-170-(i%3)*18);b.shoot(c);}
+  if(b.state.nextMarker!==17||b.state.reason!=='complete')throw new Error('ordered markers failed');
+  b.dispose();
+  return result;
+ });
+ report.bonuses=bonusChecks;
+ for(const size of [{width:1440,height:900},{width:1024,height:768},{width:390,height:844},{width:650,height:779}]){
+  await page.setViewportSize(size);await page.waitForTimeout(120);
+  await layout();await snapshot('hud-'+size.width);
+  await page.evaluate(()=>window.dispatchEvent(new Event('blur')));await action('title');
+  await layout();await snapshot('title-'+size.width);
+  await action('resumeRun');await launch();
+ }
+ assert.deepEqual(errors,[]);
+ await writeFile(out+'/arcade-report.json',JSON.stringify(report,null,2));
+ console.log('PASS',JSON.stringify({journeys:report.journeys.length+1,bonusExits:report.bonuses.length,checks:report.checks,errors}));
+} finally { await browser.close(); }

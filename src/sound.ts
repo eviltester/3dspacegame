@@ -1,4 +1,5 @@
 import type { Faction } from './logic';
+import type { WeaponFamily } from './arcade';
 
 type Wave = 'pulse' | 'triangle' | 'noise' | 'metal';
 interface Voice {
@@ -18,6 +19,21 @@ interface Effect {
 
 // Short, clocked phrases: pulse channels and shift-register noise, like an arcade sound board.
 const EFFECTS = {
+  spread: { duration: 0.21, voices: [
+    { wave: 'noise', notes: [6500, 4200, 1700, 900], level: 0.55, decay: 4 },
+    { wave: 'pulse', notes: [630, 315, 157], duty: 0.33, level: 0.35, decay: 3 }
+  ] },
+  lance: { duration: 0.32, voices: [
+    { wave: 'metal', notes: [1760, 1760, 880, 440, 220], level: 0.32, decay: 3 },
+    { wave: 'triangle', notes: [220, 110, 55], level: 0.5, decay: 2 }
+  ] },
+  intercept: { duration: 0.1, voices: [
+    { wave: 'triangle', notes: [2200, 3300], level: 0.8, decay: 4 }
+  ] },
+  blast: { duration: 0.75, voices: [
+    { wave: 'noise', notes: [1200, 9000, 6500, 3000, 1400, 600], level: 0.7, decay: 2.5 },
+    { wave: 'pulse', notes: [90, 180, 90, 45], duty: 0.2, level: 0.35, decay: 3 }
+  ] },
   shoot: { duration: 0.15, voices: [
     { wave: 'pulse', notes: [1680, 1120, 840, 560, 360, 240], duty: 0.18, level: 0.48, decay: 3.5 },
     { wave: 'noise', notes: [7200], level: 0.2, duration: 0.012, decay: 5 }
@@ -52,6 +68,11 @@ const EFFECTS = {
       duty: 0.125, level: 0.28, decay: 0.4, gated: true },
     { wave: 'noise', notes: [300, 600, 1200, 2400, 4800, 8000, 4000, 1800],
       level: 0.38, start: 0.55, duration: 1.1, decay: 1.5 }
+  ] },
+  reinforcements: { duration: 0.9, voices: [
+    { wave: 'noise', notes: [600, 1800, 6000, 10000, 1200], level: 0.45, duration: 0.45, decay: 1.2 },
+    { wave: 'triangle', notes: [45, 70, 105, 210], level: 0.5, duration: 0.4, decay: 0.7 },
+    { wave: 'pulse', notes: [330, 0, 247, 0], duty: 0.25, level: 0.42, start: 0.45, duration: 0.44, gated: true }
   ] },
   complete: { duration: 0.48, voices: [
     { wave: 'pulse', notes: [660, 880, 1320, 0, 1760], duty: 0.25, level: 0.3, gated: true, decay: 0.6 }
@@ -123,12 +144,18 @@ export class SoundBank {
   private buffers = new Map<SoundEffect, AudioBuffer>();
   private voices = new Set<AudioBufferSourceNode>();
   private lastPlayed = new Map<SoundEffect, number>();
+  private muted = false;
+
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    if (this.master) this.master.gain.value = muted ? 0 : 0.48;
+  }
 
   async start(): Promise<void> {
     if (!this.context) {
       this.context = new AudioContext();
       this.master = this.context.createGain();
-      this.master.gain.value = 0.48;
+      this.master.gain.value = this.muted ? 0 : 0.48;
       const limiter = this.context.createDynamicsCompressor();
       limiter.threshold.value = -9;
       limiter.knee.value = 6;
@@ -140,7 +167,9 @@ export class SoundBank {
     if (this.context.state !== 'running') await this.context.resume();
   }
 
-  shoot(): void { this.play('shoot'); }
+  shoot(family: WeaponFamily = 'pulse'): void { this.play(family === 'pulse' ? 'shoot' : family); }
+  intercept(): void { this.play('intercept', 0.7); }
+  blast(): void { this.play('blast'); }
   enemyShoot(faction: Faction, distance: number): void {
     const volume = Math.max(0, 1 - distance / 800) * 0.48;
     if (volume > 0.015) this.play(faction === 'police' ? 'police' : faction === 'trader' ? 'trader' : 'pirate', volume);
@@ -150,6 +179,7 @@ export class SoundBank {
   warning(): void { this.play('warning', 0.8); }
   damage(): void { this.play('damage'); }
   warp(): void { this.play('warp', 0.85); }
+  reinforcements(): void { this.play('reinforcements', 0.95, true); }
   complete(): void { this.play('complete', 0.85); }
   gameOver(): void {
     for (const voice of this.voices) voice.stop();
@@ -157,10 +187,16 @@ export class SoundBank {
     this.play('gameOver');
   }
 
-  private play(name: SoundEffect, volume = 1): void {
+  private play(name: SoundEffect, volume = 1, priority = false): void {
     if (!this.context || !this.master || this.context.state !== 'running' || volume <= 0) return;
     const now = this.context.currentTime;
-    if (now - (this.lastPlayed.get(name) ?? -Infinity) < 0.055 || this.voices.size >= 14) return;
+    if (now - (this.lastPlayed.get(name) ?? -Infinity) < 0.055) return;
+    if (this.voices.size >= 14) {
+      if (!priority) return;
+      const oldest = this.voices.values().next().value!;
+      this.voices.delete(oldest);
+      oldest.stop();
+    }
     this.lastPlayed.set(name, now);
     let buffer = this.buffers.get(name);
     if (!buffer) {
