@@ -62,7 +62,7 @@ try {
   assert(displacement.dot(forward) < -20, 'reverse must move backwards along the local ship orientation');
   assert.deepEqual(after.orientation, before.orientation);
   assert.equal(await page.locator('#speedReadout').innerText(), 'REV 45');
-  await page.mouse.click(720, 450, { button: 'middle' });
+  await page.mouse.click(720, 450, { button: 'middle', delay: 700 });
   assert.equal((await state()).menu, 'pause');
   await action('unpause'); await step(0.1);
   assert.equal((await state()).throttle, -45);

@@ -51,7 +51,13 @@ try{
    }else if(s.phase==='bonus'){
     await hold(true);
     await aim(Math.sin(bonusTicks*.12)*4,Math.cos(bonusTicks*.1)*2);
-    if(bonusTicks++>55){await hold(false);await page.mouse.click(mouse.x,mouse.y,{button:'right'});}
+    if(bonusTicks++>55){
+     await hold(false);await page.mouse.click(mouse.x,mouse.y,{button:'middle',delay:700});
+     // A loan craft can finish or crash during the hold-to-pause gesture.
+     const menu=(await state()).menu;
+     if(menu==='pause')await page.locator('#screenContent [data-action="exitBonus"]').click();
+     else assert.equal(menu,'bonusResult');
+    }
    }else{
     const pos=new THREE.Vector3(...s.position),inverse=new THREE.Quaternion(...s.orientation).invert();
     let target;
@@ -90,7 +96,7 @@ try{
   assert(iterations<10000,'playthrough timed out: '+mode);
   if(previousStage)reports.push(previousStage);
   await hold(false);
-  if((await state()).menu!=='victory'){await page.mouse.click(mouse.x,mouse.y,{button:'middle'});}
+  if((await state()).menu!=='victory'){await page.mouse.click(mouse.x,mouse.y,{button:'middle',delay:700});}
   await click('title');
  }
  assert.deepEqual(errors,[]);

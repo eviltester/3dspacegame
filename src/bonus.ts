@@ -1,103 +1,200 @@
 import * as THREE from 'three';
-import type { BonusKind } from './arcade';
-import { Random } from './encounters';
+import type { BonusKind, WeaponFamily } from './arcade';
+import { bonusProfile, TARGET_HIT_POINTS, TARGET_SHOT_COST } from './bonus-difficulty';
+import { CanyonCourse } from './canyon';
+import type { CanyonEnd } from './canyon';
+import { crossedGate, Random } from './encounters';
 import { createBoltModel, createCargoModel, createPulseRing, createTextSprite, disposeObject, edgesFromGeometry, lineShape } from './models';
-import { sweptHit } from './weapons';
+import { sweptHit, weaponSpec } from './weapons';
 
 export interface BonusRunState {
   kind: BonusKind;
+  family: WeaponFamily;
   elapsed: number;
   duration: number;
   remaining: number;
   health: number;
+  charge: number;
   points: number;
+  difficulty: number;
+  targetCount: number;
+  shotsFired: number;
   nextMarker: number;
   finished: boolean;
-  reason: 'complete' | 'crash' | 'timeout' | 'exit' | null;
+  reason: CanyonEnd | 'crash' | 'timeout' | 'exit' | 'gateMissed' | null;
   notice: string;
+  fractures: number;
+  enemyShots: number;
 }
-interface BonusObject { kind: 'rock' | 'salvage' | 'gate' | 'marker' | 'turret'; object: THREE.Object3D; radius: number; number: number; used: boolean }
+interface AsteroidMotion { size: 0 | 1 | 2; velocity: THREE.Vector3; previous: THREE.Vector3; age: number; grace: number; spin: number }
+interface MarkerMotion { home: THREE.Vector3; phase: number; direction: number; amplitude: THREE.Vector2 }
+interface BonusObject { kind: 'rock' | 'salvage' | 'gate' | 'marker' | 'turret' | 'obstacle' | 'hostileBolt'; object: THREE.Object3D; radius: number; number: number; used: boolean; rock?: AsteroidMotion; marker?: MarkerMotion }
+export const MAX_ASTEROID_FRAGMENTS = 64;
+export const ASTEROID_FRAGMENT_GRACE = 0.45;
+export const ASTEROID_DURATION = 60;
+export const ASTEROID_LENGTH = 4800;
+export function asteroidFlight(elapsed: number, difficulty = 1): { progress: number; speed: number } {
+  const scale = bonusProfile(difficulty).flightScale;
+  const t = THREE.MathUtils.clamp(elapsed * scale / ASTEROID_DURATION, 0, 1);
+  // Integrate the accelerating flight: harder runs cover the same route more quickly.
+  return { progress: 0.6 * t + 0.4 * t * t, speed: (48 + 64 * t) * scale };
+}
+const ROCK_COLORS = [0xffd179, 0xe3bd8f, 0xb1a596];
+export function asteroidGap(row: number): THREE.Vector2 { return new THREE.Vector2(Math.sin(row * 0.85) * 20, Math.sin(row * 0.6) * 9); }
 export const BONUS_NAMES: Record<BonusKind, string> = { asteroids: 'ASTEROID RUN', canyon: 'CANYON SORTIE', sequence: 'TARGET SEQUENCE' };
 export const BONUS_BRIEFS: Record<BonusKind, string> = {
-  asteroids: 'Loan skiff. Dodge the rocks, shoot a path, and scoop yellow salvage. Mouse steers; hold left click to fire. Right click exits safely.',
-  canyon: 'Loan skiff. Follow the canyon, pass through the green gates, and shoot red surface targets. Mouse steers; hold left click to fire. Right click exits safely.',
-  sequence: 'Shoot all sixteen numbered markers in order. The yellow marker is next. Wrong targets cost two seconds. Mouse aims; left click fires. Right click exits safely.'
+  asteroids: 'Loan skiff. Automatic speed increases throughout the belt. Follow the weaving gaps and scoop yellow salvage. Fly through the green EXIT gate at the end; missing it ends the bonus. Large rocks split into medium rocks, then small drifting fragments. Mouse steers; hold left click to fire. Right click uses your charged blast to vaporize nearby rocks. Pause for Exit Bonus.',
+  canyon: 'Automatic acceleration: no throttle or brake. Mouse steers; Shift or wheel forward boosts. Hold left click to destroy amber obstacles and red guns. Right click uses your charged blast. Green gates shrink and move. Miss two in a row and the sortie ends. Fly through EXIT in the final wall or crash. Pause for Exit Bonus.',
+  sequence: 'Shoot the shuffled numbers in order. The yellow marker is next. After your first hit, the remaining targets drift faster as you clear them. Correct target: +100 points. Every shot: -5 points, including misses (Spread counts as one volley). Wrong targets also cost two seconds. Mouse aims; left click fires. Pause for Exit Bonus. Only your bonus score is at risk.'
 };
+export function bonusBrief(kind: BonusKind, difficulty: number): string {
+  const profile = bonusProfile(difficulty);
+  const details = kind === 'sequence' ? `${profile.targetCount} targets. Shoot 1 to ${profile.targetCount}.`
+    : kind === 'asteroids' ? `${profile.asteroidRows} rock formations. Speed ${Math.round(48 * profile.flightScale)} to ${Math.round(112 * profile.flightScale)}.`
+      : `${profile.canyonObstacles} obstacles / ${Math.ceil(profile.canyonObstacles / 2)} guns. Speed ${Math.round(48 * profile.flightScale)} to ${Math.round(144 * profile.flightScale)}, plus boost.`;
+  return `${details} ${BONUS_BRIEFS[kind]}`;
+}
 
 export class BonusController {
   readonly root = new THREE.Group();
   readonly state: BonusRunState;
   readonly path: THREE.CatmullRomCurve3;
+  readonly canyon?: CanyonCourse;
   private objects: BonusObject[] = [];
+  private readonly rng: Random;
   private offset = new THREE.Vector2();
   private yaw = 0;
   private pitch = 0;
+  private markerClock = 0;
+  private markerSpeed = 0;
+  private asteroidGate: BonusObject | null = null;
+  private exitAnnounced = false;
   private collisionDelay = 0;
-  private bolts: Array<{ object: THREE.Object3D; direction: THREE.Vector3; life: number }> = [];
+  private blastEffect: { object: THREE.LineSegments; life: number; direction: THREE.Vector3 } | null = null;
+  private bolts: Array<{ object: THREE.Object3D; direction: THREE.Vector3; speed: number; life: number }> = [];
   private previous = new THREE.Vector3();
-  constructor(kind: BonusKind, seed: number) {
-    const duration = kind === 'canyon' ? 75 : 60;
-    this.state = { kind, elapsed: 0, duration, remaining: duration, health: 3, points: 0, nextMarker: 1, finished: false, reason: null, notice: '' };
-    const rng = new Random(seed);
-    const points = Array.from({ length: 17 }, (_, index) => new THREE.Vector3(kind === 'canyon' ? Math.sin(index * 0.8) * 80 : 0,
-      kind === 'canyon' ? Math.sin(index * 0.45) * 12 : 0, -index * 300));
+  private readonly profile;
+  constructor(kind: BonusKind, seed: number, difficulty = 1) {
+    const profile = this.profile = bonusProfile(difficulty);
+    const duration = kind === 'asteroids' ? ASTEROID_DURATION / profile.flightScale : kind === 'canyon' ? 75 : 60;
+    this.state = { kind, family: 'pulse', elapsed: 0, duration, remaining: duration, health: 3, charge: 100, points: 0,
+      difficulty: profile.level, targetCount: profile.targetCount, shotsFired: 0, nextMarker: 1, finished: false, reason: null, notice: '', fractures: 0, enemyShots: 0 };
+    const rng = this.rng = new Random(seed);
+    if (kind === 'canyon') {
+      this.canyon = new CanyonCourse(this.root, seed, profile.level); this.path = this.canyon.path;
+      this.objects.push(...this.canyon.targets); this.state.remaining = this.canyon.remaining;
+      this.state.duration = this.state.remaining; return;
+    }
+    const points = Array.from({ length: 17 }, (_, index) => new THREE.Vector3(0, 0, -index * ASTEROID_LENGTH / 16));
     this.path = new THREE.CatmullRomCurve3(points);
     if (kind === 'sequence') {
-      for (let i = 0; i < 16; i += 1) {
+      const numbers = Array.from({ length: profile.targetCount }, (_, i) => i + 1);
+      for (let i = numbers.length - 1; i > 0; i--) {
+        const j = Math.floor(rng.next() * (i + 1));
+        [numbers[i], numbers[j]] = [numbers[j], numbers[i]];
+      }
+      const columns = Math.ceil(Math.sqrt(profile.targetCount)), rows = Math.ceil(profile.targetCount / columns);
+      for (let i = 0; i < profile.targetCount; i += 1) {
+        const number = numbers[i];
+        const radius = rng.range(profile.targetMinRadius, 9);
         const object = new THREE.Group();
-        object.add(createPulseRing(0x77dfff, 9, 0, 0.9, 8));
-        object.add(createTextSprite(String(i + 1), '#ffffff', undefined, 12, 8));
-        object.position.set((i % 4 - 1.5) * 33, (1.5 - Math.floor(i / 4)) * 27, -170 - (i % 3) * 18);
-        this.add('marker', object, 10, i + 1);
+        object.add(createPulseRing(number === 1 ? 0xffff50 : 0x39708a, radius, 0, number === 1 ? 0.95 : 0.5, 8));
+        object.add(createTextSprite(String(number), '#ffffff', undefined, 42 * radius / 9, 14 * radius / 9));
+        object.position.set((i % columns - (columns - 1) / 2) * 36 + rng.range(-profile.targetJitter, profile.targetJitter),
+          ((rows - 1) / 2 - Math.floor(i / columns)) * 32 + rng.range(-profile.targetJitter, profile.targetJitter), -190);
+        this.add('marker', object, radius + 1, number).marker = { home: object.position.clone(), phase: rng.range(0, Math.PI * 2), direction: rng.next() < 0.5 ? -1 : 1,
+          amplitude: new THREE.Vector2(17 - radius - profile.targetJitter, 15 - radius - profile.targetJitter) };
       }
     } else {
-      for (let i = 1; i <= 55; i += 1) {
-        const t = i / 58;
+      for (let i = 1; i <= profile.asteroidRows; i += 1) {
+        const row = i * 55 / profile.asteroidRows, t = row / 58;
         const center = this.path.getPoint(t);
-        if (kind === 'canyon') {
-          const next = this.path.getPoint(Math.min(1, t + 1 / 58));
-          const vertices: Array<[number, number, number]> = [
-            [center.x - 43, -32 + center.y, center.z], [center.x - 50, 42 + center.y, center.z],
-            [center.x + 43, -32 + center.y, center.z], [center.x + 50, 42 + center.y, center.z],
-            [next.x - 43, -32 + next.y, next.z], [next.x - 50, 42 + next.y, next.z],
-            [next.x + 43, -32 + next.y, next.z], [next.x + 50, 42 + next.y, next.z]
-          ];
-          this.root.add(lineShape(vertices, [[0, 1], [2, 3], [0, 2], [0, 4], [1, 5], [2, 6], [3, 7]], 0x508bc6, 0.7));
-          if (i % 3 === 0) {
-            const gate = createPulseRing(0x48ff95, 13, 0, 0.8, 8);
-            gate.position.copy(center).add(new THREE.Vector3(Math.sin(i) * 16, Math.cos(i) * 12, 0));
-            this.add('gate', gate, 15);
-            const target = edgesFromGeometry(new THREE.TetrahedronGeometry(6), 0xff4055);
-            target.position.copy(center).add(new THREE.Vector3(i % 2 ? 25 : -25, -17, -25));
-            this.add('turret', target, 8);
-          }
-        } else {
-          for (let j = 0; j < 2; j += 1) {
-            const rock = edgesFromGeometry(new THREE.IcosahedronGeometry(rng.range(5, 11), 0), 0xb1a596, 0.85);
-            // Keep the central flight corridor clear; riskier salvage lies beside the rocks.
-            rock.position.copy(center).add(new THREE.Vector3((j ? 1 : -1) * rng.range(14, 55), rng.range(-24, 24), rng.range(-12, 12)));
-            this.add('rock', rock, 8);
-          }
-          if (i % 2 === 0) {
-            const salvage = createCargoModel('credits');
-            salvage.position.copy(center).add(new THREE.Vector3(Math.sin(i) * 16, Math.cos(i) * 10, 15));
-            this.add('salvage', salvage, 8);
-          }
+        const gap = asteroidGap(row);
+        for (let j = 0; j < 2; j += 1) {
+          const radius = rng.range(10, 13);
+          // Leave a twelve-unit gap around a gently weaving route, not a straight safe tunnel.
+          const position = center.clone().add(new THREE.Vector3(gap.x + (j ? 1 : -1) * (radius + 14), gap.y, 0));
+          this.addRock(position, radius, 2);
+        }
+        if (i % 2 === 0) {
+          const salvage = createCargoModel('credits');
+          salvage.position.copy(center).add(new THREE.Vector3(gap.x, gap.y, 15));
+          this.add('salvage', salvage, 8);
         }
       }
+      const gate = new THREE.Group(), radius = 18, gap = asteroidGap(55);
+      gate.add(createPulseRing(0x48ff95, radius, 0, 1, 8), createPulseRing(0x48ff95, radius, -5, 0.6, 8));
+      const label = createTextSprite('EXIT', '#ffff70', undefined, 70, 22);
+      label.position.set(0, radius + 23, 4); gate.add(label);
+      gate.add(lineShape([[0, radius + 14, 4], [0, radius + 2, 4], [-4, radius + 6, 4], [4, radius + 6, 4]], [[0, 1], [1, 2], [1, 3]], 0xffff70));
+      gate.position.set(gap.x, gap.y, -ASTEROID_LENGTH);
+      this.asteroidGate = this.add('gate', gate, radius);
     }
   }
-  private add(kind: BonusObject['kind'], object: THREE.Object3D, radius: number, number = 0): void {
+  private add(kind: BonusObject['kind'], object: THREE.Object3D, radius: number, number = 0): BonusObject {
     this.root.add(object);
-    this.objects.push({ kind, object, radius, number, used: false });
+    const item = { kind, object, radius, number, used: false };
+    this.objects.push(item);
+    return item;
   }
-  step(dt: number, look: { x: number; y: number }, camera: THREE.PerspectiveCamera): void {
+  private addRock(position: THREE.Vector3, radius: number, size: 0 | 1 | 2, velocity = new THREE.Vector3()): void {
+    const geometry = size === 2 ? new THREE.IcosahedronGeometry(radius, 0) : new THREE.OctahedronGeometry(radius, 0);
+    const object = edgesFromGeometry(geometry, ROCK_COLORS[size], 0.9);
+    object.position.copy(position); object.rotation.set(this.rng.range(0, 3), this.rng.range(0, 3), this.rng.range(0, 3));
+    this.add('rock', object, radius).rock = { size, velocity, previous: position.clone(), age: 0,
+      grace: size < 2 ? ASTEROID_FRAGMENT_GRACE : 0, spin: this.rng.range(-1, 1) * (size === 2 ? 0.25 : 1.4) };
+  }
+  private breakRock(item: BonusObject): void {
+    this.consume(item);
+    const rock = item.rock;
+    if (!rock || rock.size === 0) return;
+    if (this.objects.filter(other => !other.used && other.rock && other.rock.size < 2).length + 2 > MAX_ASTEROID_FRAGMENTS) return;
+    const size = (rock.size - 1) as 0 | 1, radius = item.radius * 0.57;
+    const angle = this.rng.range(0, Math.PI * 2), spread = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
+    const speed = (size === 1 ? 11 : 18) * this.profile.motionScale;
+    for (const side of [-1, 1]) {
+      const position = item.object.position.clone().addScaledVector(spread, side * radius * 1.2);
+      const velocity = rock.velocity.clone().multiplyScalar(0.4).addScaledVector(spread, side * speed);
+      velocity.z = this.rng.range(14, 23);
+      this.addRock(position, radius, size, velocity);
+    }
+    this.state.fractures++;
+  }
+  get rocks() {
+    return this.objects.filter(item => !item.used && item.rock).map(item => ({ id: item.object.id, size: item.rock!.size,
+      radius: item.radius, position: item.object.position.toArray(), velocity: item.rock!.velocity.toArray(), grace: item.rock!.grace }));
+  }
+  get targetSequence() {
+    if (this.state.kind !== 'sequence') return undefined;
+    return { speed: this.markerSpeed, targets: this.objects.filter(item => item.kind === 'marker').map(item => ({
+      id: item.object.id, number: item.number, radius: item.radius - 1, position: item.object.position.toArray(), used: item.used,
+      highlighted: !item.used && item.number === this.state.nextMarker
+    })) };
+  }
+  get asteroidRun() {
+    if (!this.asteroidGate) return undefined;
+    return { ...asteroidFlight(this.state.elapsed, this.state.difficulty), gate: { position: this.asteroidGate.object.position.toArray(), radius: this.asteroidGate.radius },
+      exitApproach: this.exitAnnounced };
+  }
+  step(dt: number, look: { x: number; y: number; boost?: boolean }, camera: THREE.PerspectiveCamera): void {
     if (this.state.finished) return;
     this.state.elapsed += dt;
     this.state.remaining = Math.max(0, this.state.remaining - dt);
     this.collisionDelay = Math.max(0, this.collisionDelay - dt);
     this.previous.copy(camera.position);
-    if (this.state.kind === 'sequence') {
+    if (this.canyon) {
+      const events = this.canyon.step(dt, look, camera);
+      this.state.remaining = this.canyon.remaining;
+      this.state.points += events.points; this.state.enemyShots += events.shots;
+      if (events.notice) this.state.notice = events.notice;
+      if (events.end) this.finish(events.end);
+      else if (events.damage) this.damage();
+    } else if (this.state.kind === 'sequence') {
+      if (this.state.nextMarker > 1) {
+        const speed = (0.7 + (this.state.nextMarker - 2) / (this.state.targetCount - 1) * 2.1) * this.profile.motionScale;
+        this.markerSpeed = Math.min(4.5, speed, this.markerSpeed + dt * 1.5 * this.profile.motionScale);
+        this.markerClock += dt * this.markerSpeed;
+      }
       this.yaw = THREE.MathUtils.clamp(this.yaw - look.x * 0.0022, -0.55, 0.55);
       this.pitch = THREE.MathUtils.clamp(this.pitch - look.y * 0.0022, -0.45, 0.45);
       camera.position.set(0, 0, 0);
@@ -105,16 +202,34 @@ export class BonusController {
     } else {
       this.offset.x = THREE.MathUtils.clamp(this.offset.x + look.x * 0.13, -38, 38);
       this.offset.y = THREE.MathUtils.clamp(this.offset.y - look.y * 0.13, -24, 30);
-      const t = Math.min(0.998, this.state.elapsed / this.state.duration);
-      const position = this.path.getPoint(t);
+      const t = asteroidFlight(this.state.elapsed, this.state.difficulty).progress;
+      const position = this.path.getPointAt(t);
       camera.position.copy(position).add(new THREE.Vector3(this.offset.x, this.offset.y, 0));
-      camera.lookAt(this.path.getPoint(Math.min(1, t + 0.015)).add(new THREE.Vector3(this.offset.x, this.offset.y, 0)));
+      camera.lookAt(camera.position.clone().add(new THREE.Vector3(0, 0, -1)));
       camera.rotateZ(-this.offset.x * 0.002);
-      if (this.state.kind === 'canyon' && (Math.abs(this.offset.x) > 36 || this.offset.y < -22)) this.damage();
+      if (!this.exitAnnounced && t >= 0.75) { this.exitAnnounced = true; this.state.notice = 'EXIT GATE AHEAD / FLY THROUGH THE OPENING'; }
     }
     for (const item of this.objects) {
-      if (item.used) continue;
+      if (item.used || this.canyon || item.kind === 'gate') continue;
+      if (item.rock) {
+        const rock = item.rock;
+        rock.previous.copy(item.object.position);
+        rock.age += dt; rock.grace = Math.max(0, rock.grace - dt);
+        item.object.position.addScaledVector(rock.velocity, dt); item.object.rotation.x += rock.spin * dt; item.object.rotation.y += rock.spin * dt * 0.7;
+        if (rock.size < 2) {
+          const material = (item.object as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>).material;
+          material.color.setHex(rock.grace > 0 ? 0xfff5dd : ROCK_COLORS[rock.size]);
+          if (rock.age > 12 || item.object.position.z > camera.position.z + 40) { this.consume(item); continue; }
+        }
+        if (rock.grace > 0) continue;
+      }
       if (item.kind === 'marker') {
+        if (item.marker && this.markerClock > 0) {
+          const motion = item.marker, time = this.markerClock * motion.direction, blend = Math.min(1, this.markerClock);
+          // Each differently sized ring stays inside its own cell, including its seeded offset.
+          item.object.position.copy(motion.home).add(new THREE.Vector3(
+            Math.sin(time + motion.phase) * motion.amplitude.x * blend, Math.cos(time * 0.8 + motion.phase) * motion.amplitude.y * blend, 0));
+        }
         item.object.traverse(child => {
           if (child instanceof THREE.LineSegments) {
             const material = child.material as THREE.LineBasicMaterial;
@@ -122,37 +237,88 @@ export class BonusController {
             material.opacity = item.number === this.state.nextMarker ? 0.75 + Math.sin(this.state.elapsed * 7) * 0.2 : 0.5;
           }
         });
-      } else if (sweptHit(this.previous, camera.position, item.object.position, item.object.position, item.radius + 2) !== null) {
+      } else if (sweptHit(this.previous, camera.position, item.rock?.previous ?? item.object.position, item.object.position, item.radius + 2) !== null) {
         this.consume(item);
         if (item.kind === 'rock' || item.kind === 'turret') this.damage();
-        else this.state.points += item.kind === 'gate' ? 5 : 3;
+        else this.state.points += 3;
       }
     }
-    for (const bolt of this.bolts) { bolt.life -= dt; bolt.object.position.addScaledVector(bolt.direction, 520 * dt); }
+    this.objects = this.objects.filter(item => {
+      if (!item.used || !item.rock || item.rock.size === 2) return true;
+      this.root.remove(item.object); disposeObject(item.object); return false;
+    });
+    for (const bolt of this.bolts) { bolt.life -= dt; bolt.object.position.addScaledVector(bolt.direction, bolt.speed * dt); }
     this.bolts = this.bolts.filter(bolt => { if (bolt.life > 0) return true; this.root.remove(bolt.object); disposeObject(bolt.object); return false; });
-    if (this.state.remaining <= 0) this.finish(this.state.kind === 'sequence' ? 'timeout' : 'complete');
+    if (this.blastEffect) {
+      const effect = this.blastEffect;
+      effect.life = Math.max(0, effect.life - dt);
+      effect.object.position.addScaledVector(effect.direction, 80 * dt);
+      effect.object.scale.setScalar(1 + (1 - effect.life / 0.65) * 4);
+      (effect.object.material as THREE.LineBasicMaterial).opacity = effect.life / 0.65;
+      if (effect.life === 0) { this.root.remove(effect.object); disposeObject(effect.object); this.blastEffect = null; }
+    }
+    if (this.asteroidGate && this.state.elapsed >= this.state.duration) {
+      const gate = this.asteroidGate;
+      this.finish(crossedGate(this.previous, camera.position, gate.object.position, gate.object.quaternion, gate.radius * Math.cos(Math.PI / 8) - 2) ? 'complete' : 'gateMissed');
+    } else if (!this.canyon && this.state.kind === 'sequence' && this.state.remaining <= 0) this.finish('timeout');
   }
   shoot(camera: THREE.PerspectiveCamera): boolean {
-    const direction = camera.getWorldDirection(new THREE.Vector3());
-    const ray = new THREE.Ray(camera.position, direction);
-    const targets = this.objects.filter(item => !item.used && item.kind !== 'gate' && item.kind !== 'salvage')
-      .map(item => ({ item, point: ray.intersectSphere(new THREE.Sphere(item.object.position, item.radius), new THREE.Vector3()) }))
-      .filter(hit => hit.point && hit.point.distanceTo(camera.position) < 650)
-      .sort((a, b) => a.point!.distanceToSquared(camera.position) - b.point!.distanceToSquared(camera.position));
-    const bolt = createBoltModel(0xf8ffee, 2, 14, 'player');
-    bolt.position.copy(camera.position).addScaledVector(direction, 10);
-    bolt.lookAt(bolt.position.clone().add(direction));
-    this.root.add(bolt);
-    this.bolts.push({ object: bolt, direction, life: 0.7 });
-    const item = targets[0]?.item;
-    if (!item) return false;
-    if (item.kind === 'marker') {
-      if (item.number !== this.state.nextMarker) { this.state.remaining = Math.max(0, this.state.remaining - 2); this.state.notice = 'WRONG MARKER: -2 SECONDS'; return false; }
-      this.state.nextMarker += 1;
-      this.state.points += 1;
+    if (this.state.finished) return false;
+    this.state.shotsFired++;
+    if (this.state.kind === 'sequence') this.state.points -= TARGET_SHOT_COST;
+    const spec = weaponSpec(this.state.family, 1);
+    const forward = camera.getWorldDirection(new THREE.Vector3());
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    const candidates: BonusObject[] = [...this.objects, ...(this.canyon?.shots ?? [])].filter(item => !item.used && item.kind !== 'gate' && item.kind !== 'salvage');
+    let confirmed = false, wrongMarker = false, targetHit = false;
+    for (let index = 0; index < spec.count; index++) {
+      const direction = forward.clone().applyAxisAngle(up, (index - (spec.count - 1) / 2) * spec.spread);
+      const ray = new THREE.Ray(camera.position, direction);
+      const targets = candidates.filter(item => !item.used)
+        .map(item => ({ item, point: ray.intersectSphere(new THREE.Sphere(item.object.position, item.radius), new THREE.Vector3()) }))
+        .filter(hit => hit.point && hit.point.distanceTo(camera.position) < 650)
+        .sort((a, b) => a.point!.distanceToSquared(camera.position) - b.point!.distanceToSquared(camera.position));
+      const bolt = createBoltModel(spec.color, spec.radius, spec.length, 'player', this.state.family);
+      bolt.position.copy(camera.position).addScaledVector(direction, 10);
+      bolt.lookAt(bolt.position.clone().add(direction)); this.root.add(bolt);
+      this.bolts.push({ object: bolt, direction, speed: spec.speed, life: 0.7 });
+      for (const { item } of targets.slice(0, spec.pierce)) {
+        if (item.kind === 'marker') {
+          if (item.number !== this.state.nextMarker) { wrongMarker = true; continue; }
+          this.state.nextMarker += 1;
+          this.state.points += TARGET_HIT_POINTS; this.consume(item);
+          if (this.state.nextMarker > this.state.targetCount) this.finish('complete');
+        } else if (item.kind === 'hostileBolt') {
+          this.consume(item); this.state.charge = Math.min(100, this.state.charge + 10);
+        } else {
+          this.state.points += item.kind === 'turret' ? 4 : 1;
+          if (item.kind === 'rock') this.breakRock(item); else this.consume(item);
+        }
+        confirmed = true;
+        if (item.kind !== 'hostileBolt') targetHit = true;
+      }
+    }
+    // A spread volley can touch the same wrong marker more than once: penalize the trigger pull once.
+    if (wrongMarker) { this.state.remaining = Math.max(0, this.state.remaining - 2); this.state.notice = 'WRONG MARKER: -2 SECONDS'; }
+    if (targetHit) this.state.charge = Math.min(100, this.state.charge + 5);
+    return confirmed;
+  }
+  blast(camera: THREE.PerspectiveCamera): boolean {
+    if (this.state.finished || this.state.charge < 100) return false;
+    this.state.charge = 0;
+    for (const item of this.objects) {
+      if (item.used || (item.kind !== 'rock' && item.kind !== 'turret' && item.kind !== 'obstacle') || item.object.position.distanceTo(camera.position) > 240) continue;
       this.consume(item);
-      if (this.state.nextMarker > 16) this.finish('complete');
-    } else { this.state.points += item.kind === 'turret' ? 4 : 1; this.consume(item); }
+      this.state.points += item.kind === 'turret' ? 4 : 1;
+    }
+    this.canyon?.clearFire(camera.position);
+    if (this.blastEffect) { this.root.remove(this.blastEffect.object); disposeObject(this.blastEffect.object); }
+    const direction = camera.getWorldDirection(new THREE.Vector3());
+    const object = createPulseRing(0xcaffff, 18, 0, 1, 24);
+    object.position.copy(camera.position).addScaledVector(direction, 90);
+    object.quaternion.copy(camera.quaternion);
+    this.root.add(object);
+    this.blastEffect = { object, life: 0.65, direction };
     return true;
   }
   private consume(item: BonusObject): void { item.used = true; item.object.visible = false; }
@@ -168,8 +334,9 @@ export class BonusController {
     this.state.reason = reason;
   }
   get ratio(): number {
-    if (this.state.kind === 'sequence') return Math.min(1, this.state.points / 16);
-    return Math.min(1, (this.state.elapsed / this.state.duration) * 0.4 + this.state.points / (this.state.kind === 'canyon' ? 75 : 55) * 0.6);
+    if (this.state.kind === 'sequence') return THREE.MathUtils.clamp(this.state.points / (this.state.targetCount * (TARGET_HIT_POINTS - TARGET_SHOT_COST)), 0, 1);
+    if (this.canyon) return Math.min(1, this.canyon.progress * 0.3 + this.canyon.passed / 18 * 0.4 + this.state.points / 150 * 0.3);
+    return Math.min(1, (this.state.elapsed / this.state.duration) * 0.4 + this.state.points / this.profile.asteroidRows * 0.6);
   }
   dispose(): void { disposeObject(this.root); this.root.clear(); }
 }

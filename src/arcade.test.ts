@@ -101,7 +101,7 @@ describe('arcade checkpoints and rewards', () => {
   it('ignores corrupt and invalid saves', () => {
     expect(parseProfile('{bad', '{bad').checkpoints).toEqual({});
     const p = freshProfile(); p.checkpoints.journey = newRun('journey', 5);
-    p.checkpoints.journey.stage = 99;
+    p.checkpoints.journey.stage = 100;
     expect(parseProfile(JSON.stringify(p), null).checkpoints).toEqual({});
   });
 });

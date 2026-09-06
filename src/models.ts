@@ -28,6 +28,16 @@ export function createEnemyModel(role: EnemyArchetype): THREE.Group {
 }
 
 export interface CatalogItem { title: string; description: string; create: () => THREE.Object3D; scale: number; cameraZ: number }
+export function createCanyonTurret(): THREE.LineSegments {
+  return lineShape([[-6, -3, -4], [6, -3, -4], [6, -3, 4], [-6, -3, 4], [0, 3, 0], [0, 3, 10]],
+    [[0, 1], [1, 2], [2, 3], [3, 0], [0, 4], [1, 4], [2, 4], [3, 4], [4, 5]], 0xff4055);
+}
+export function createCanyonGate(radius = 12): THREE.Group {
+  const gate = new THREE.Group();
+  gate.add(createPulseRing(0x48ff95, radius, 0, 1, 8));
+  gate.add(createPulseRing(0x48ff95, radius, -3, 0.55, 8));
+  return gate;
+}
 export function createCatalog(): CatalogItem[] {
   const roles: Array<[EnemyArchetype, string]> = [
     ['raider', 'Charges head-on. Shoot the red ships and their incoming fire.'],
@@ -55,8 +65,11 @@ export function createCatalog(): CatalogItem[] {
     { title: 'BLACK MARKET', description: 'The magenta exchange buys contraband. Its outer ring is not cargo.', create: createBlackMarketModel, scale: 0.65, cameraZ: 92 },
     { title: 'WARP GATE', description: 'When the mission is complete, follow the flashing arrow and fly through the opening.', create: createGateModel, scale: 0.62, cameraZ: 104 },
     { title: 'MINE', description: 'A red wireframe star. It flashes before arming. Destroy it from a distance.', create: () => edgesFromGeometry(new THREE.OctahedronGeometry(4), 0xff4055), scale: 3, cameraZ: 62 },
-    { title: 'ASTEROID', description: 'Shoot or dodge these during bonus runs. The central corridor has a safe route.', create: () => edgesFromGeometry(new THREE.IcosahedronGeometry(6), 0xada596), scale: 2, cameraZ: 62 },
-    { title: 'BONUS MARKER', description: 'Shoot numbered markers in order. Yellow marks your next target.', create: () => createPulseRing(0xffff60, 7, 0, 1, 8), scale: 2, cameraZ: 62 }
+    { title: 'ASTEROID', description: 'Large rocks split into medium rocks, then drifting fragments. The belt accelerates: follow the gaps and fly through EXIT. Blasts vaporize rocks.', create: () => edgesFromGeometry(new THREE.IcosahedronGeometry(6), 0xada596), scale: 2, cameraZ: 62 },
+    { title: 'BONUS MARKER', description: 'Find the shuffled numbers and shoot in order. Yellow is next. Remaining markers move faster after successful hits.', create: () => createPulseRing(0xffff60, 7, 0, 1, 8), scale: 2, cameraZ: 62 },
+    { title: 'CANYON GATE', description: 'Fly through the green opening. Gates shrink and move. Two consecutive misses end the bonus.', create: createCanyonGate, scale: 1.5, cameraZ: 62 },
+    { title: 'CANYON GUN', description: 'Flashes yellow before firing red bolts. Shoot the gun or intercept its fire.', create: createCanyonTurret, scale: 2, cameraZ: 62 },
+    { title: 'CANYON OBSTACLE', description: 'Amber rock spires obstruct the route. Dodge or shoot them. Find the exit opening in the final wall.', create: () => edgesFromGeometry(new THREE.OctahedronGeometry(8), 0xffbf48), scale: 2, cameraZ: 62 }
   );
   return items;
 }
@@ -123,6 +136,18 @@ export function createPirateModel(): THREE.Group {
     COLORS.pirate
   ));
   return group;
+}
+
+export function createArmadaRig(): { root: THREE.Group; craft: THREE.Group } {
+  const root = new THREE.Group();
+  root.add(lineShape([[-86, -5, -18], [86, -5, -18], [-86, -5, 18], [86, -5, 18],
+    [-86, 12, 0], [-86, -12, 0], [86, 12, 0], [86, -12, 0]],
+  [[0, 1], [2, 3], [0, 2], [1, 3], [4, 5], [6, 7]], 0x75caff, 0.6));
+  const craft = new THREE.Group();
+  craft.add(lineShape([[0, 0, -12], [-8, 0, 7], [-3, 0, 4], [0, 3, 2], [3, 0, 4], [8, 0, 7], [0, -2, 6]],
+    [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 0], [0, 3], [2, 6], [4, 6]], 0xedffff));
+  root.add(craft);
+  return { root, craft };
 }
 
 export function createTraderHaulerModel(): THREE.Group {

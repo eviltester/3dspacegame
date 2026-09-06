@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { FlightInput, throttleReadout, wheelThrottle } from './input';
-afterEach(() => vi.unstubAllGlobals());
+import { FlightInput, MOUSE_PAUSE_HOLD_MS, throttleReadout, weaponKey, wheelThrottle } from './input';
+import { selectWeapon } from './weapons';
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 it('latches a quick mouse click, maintains throttle, and clears held input on pause', async () => {
   const canvas = new EventTarget() as HTMLCanvasElement;
   const windowTarget = new EventTarget();
@@ -54,7 +55,7 @@ it.each(['KeyS', 'ArrowDown'])('allows %s to reverse, maintains reverse on relea
   expect(input.consume(1).speed).toBe(-35);
   expect(input.consume(2).speed).toBe(-90);
   key('keyup', code);
-  expect(input.consume(10)).toEqual({ x: 0, y: 0, roll: 0, speed: -90 });
+  expect(input.consume(10)).toEqual({ x: 0, y: 0, roll: 0, speed: -90, boost: false });
   key('keydown', 'ShiftLeft');
   expect(input.consume(0.1).speed).toBe(-130);
   expect(input.throttle).toBe(-90);
@@ -67,4 +68,91 @@ it.each(['KeyS', 'ArrowDown'])('allows %s to reverse, maintains reverse on relea
   expect(input.consume(10).speed).toBe(180);
   key('keyup', 'KeyW'); key('keydown', 'ShiftRight');
   expect(input.consume(0.1).speed).toBe(230);
+});
+
+it.each([
+  ['Digit1', 'pulse'], ['Numpad1', 'pulse'], ['Digit2', 'spread'], ['Numpad2', 'spread'],
+  ['Digit3', 'lance'], ['Numpad3', 'lance'], ['Tab', 'next'], ['KeyA', null], ['Digit4', null]
+])('maps weapon key %s to %s', (key, family) => { expect(weaponKey(key!)).toBe(family); });
+
+it('cycles Pulse, Spread, Lance and wraps back to Pulse', () => {
+  expect(selectWeapon('pulse', 'next')).toBe('spread');
+  expect(selectWeapon('spread', 'next')).toBe('lance');
+  expect(selectWeapon('lance', 'next')).toBe('pulse');
+  expect(selectWeapon('lance', 'spread')).toBe('spread');
+  expect(selectWeapon('pulse', 'pulse')).toBe('pulse');
+});
+
+async function weaponInputFixture() {
+  const canvas = new EventTarget() as HTMLCanvasElement;
+  const windowTarget = new EventTarget();
+  const documentTarget = Object.assign(new EventTarget(), { pointerLockElement: null as HTMLCanvasElement | null, hidden: false, exitPointerLock: () => {} });
+  canvas.requestPointerLock = async () => { documentTarget.pointerLockElement = canvas; };
+  vi.stubGlobal('window', windowTarget); vi.stubGlobal('document', documentTarget);
+  const pause = vi.fn(), special = vi.fn(), weapon = vi.fn();
+  const input = new FlightInput(canvas, pause, special, weapon);
+  const mouse = (down: boolean, button = 1) => (down ? canvas : windowTarget).dispatchEvent(Object.assign(new Event(down ? 'mousedown' : 'mouseup', { cancelable: true }), { button }));
+  const key = (code: string, extra = {}) => {
+    const event = Object.assign(new Event('keydown', { cancelable: true }), { code, repeat: false, ...extra });
+    windowTarget.dispatchEvent(event); return event;
+  };
+  return { input, mouse, key, pause, special, weapon, windowTarget, canvas };
+}
+
+it('switches once per active key press, consumes Tab, and keeps firing/throttle intact', async () => {
+  const { input, key, mouse, weapon, special } = await weaponInputFixture();
+  expect(key('Tab').defaultPrevented).toBe(false); expect(weapon).not.toHaveBeenCalled();
+  await input.engage(); mouse(true, 0);
+  expect(key('Digit2').defaultPrevented).toBe(true); expect(weapon).toHaveBeenLastCalledWith('spread');
+  key('Digit2', { repeat: true }); expect(weapon).toHaveBeenCalledTimes(1);
+  expect(key('Tab').defaultPrevented).toBe(true); expect(weapon).toHaveBeenLastCalledWith('next');
+  key('Tab', { repeat: true }); expect(weapon).toHaveBeenCalledTimes(2);
+  for (const modifier of ['ctrlKey', 'altKey', 'metaKey', 'isComposing']) expect(key('Tab', { [modifier]: true }).defaultPrevented).toBe(false);
+  expect(weapon).toHaveBeenCalledTimes(2);
+  expect(input.consumeFire()).toBe(true); expect(input.consume(1).speed).toBe(65);
+  mouse(true, 2); expect(special).toHaveBeenCalledOnce();
+  input.release(); expect(key('Tab').defaultPrevented).toBe(false);
+  key('Digit3'); expect(weapon).toHaveBeenCalledTimes(2);
+});
+
+it('short wheel clicks cycle exactly once without pausing', async () => {
+  vi.useFakeTimers();
+  const { input, mouse, weapon, pause } = await weaponInputFixture(); await input.engage();
+  mouse(true); vi.advanceTimersByTime(MOUSE_PAUSE_HOLD_MS - 1);
+  expect(weapon).not.toHaveBeenCalled(); expect(pause).not.toHaveBeenCalled();
+  mouse(false); expect(weapon).toHaveBeenCalledExactlyOnceWith('next');
+  mouse(false); vi.advanceTimersByTime(1000);
+  expect(weapon).toHaveBeenCalledOnce(); expect(pause).not.toHaveBeenCalled();
+});
+
+it('holding the wheel pauses without cycling on release', async () => {
+  vi.useFakeTimers();
+  const { input, mouse, weapon, pause } = await weaponInputFixture(); await input.engage();
+  mouse(true); vi.advanceTimersByTime(MOUSE_PAUSE_HOLD_MS);
+  expect(pause).toHaveBeenCalledOnce(); mouse(false); vi.advanceTimersByTime(1000);
+  expect(weapon).not.toHaveBeenCalled(); expect(pause).toHaveBeenCalledOnce();
+});
+
+it('clears pending wheel holds on release/pause so they cannot fire after resume', async () => {
+  vi.useFakeTimers();
+  const { input, mouse, weapon, pause } = await weaponInputFixture(); await input.engage();
+  mouse(true); vi.advanceTimersByTime(200); input.release(); await input.engage();
+  vi.advanceTimersByTime(1000); mouse(false);
+  expect(pause).not.toHaveBeenCalled(); expect(weapon).not.toHaveBeenCalled();
+});
+
+it('locks canyon throttle, permits Shift and wheel-forward boost, and clears boosts on pause', async () => {
+  const { input, key, canvas, windowTarget } = await weaponInputFixture();
+  input.throttle = -45; input.autoFlight = true; await input.engage();
+  const wheel = (deltaY: number) => canvas.dispatchEvent(Object.assign(new Event('wheel'), { deltaY }));
+  for (const code of ['KeyW', 'KeyS', 'ArrowUp', 'ArrowDown']) { key(code); input.consume(1); }
+  wheel(100); expect(input.consume(0.1).boost).toBe(false); expect(input.throttle).toBe(-45);
+  wheel(-100); expect(input.consume(0.1).boost).toBe(true); expect(input.throttle).toBe(-45);
+  input.consume(2); expect(input.consume(0.1).boost).toBe(false);
+  key('ShiftLeft'); expect(input.consume(0.1).boost).toBe(true);
+  windowTarget.dispatchEvent(Object.assign(new Event('keyup'), { code: 'ShiftLeft' }));
+  expect(input.consume(0.1).boost).toBe(false);
+  wheel(-100); input.release(); await input.engage();
+  expect(input.consume(0.1).boost).toBe(false); expect(input.throttle).toBe(-45);
+  input.autoFlight = false; wheel(-100); expect(input.throttle).toBe(-30);
 });

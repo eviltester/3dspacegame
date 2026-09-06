@@ -14,6 +14,7 @@ export interface RunResources {
   charge: number;
 }
 export interface RunState extends RunResources {
+  practice?: boolean;
   mode: GameMode;
   seed: number;
   stage: number;
@@ -25,6 +26,8 @@ export interface RunState extends RunResources {
   bonusStatus: 'available' | 'entered' | 'settled' | 'skipped';
   chain: { kills: number; multiplier: number; remaining: number; recent: number[] };
   elapsed: number;
+  timeRemaining: number;
+  timeBonus: number | null;
   kills: number;
   earlyCore: boolean;
 }
@@ -37,6 +40,9 @@ export interface ProfileSaveV2 {
   checkpoints: Partial<Record<GameMode, RunState>>;
 }
 export const SAVE_V2 = 'vector-shooter-save-v2';
+export const JOURNEY_STAGE_COUNT = 99;
+export const STAGE_TIME_LIMIT = 120;
+export const TIME_BONUS_RATE = 10;
 export const FAMILIES: WeaponFamily[] = ['pulse', 'spread', 'lance'];
 export function canNpcCollect(faction: Faction, type: CargoType, essential = false): boolean {
   if (essential || type === 'rescuePod') return false;
@@ -48,7 +54,27 @@ export const resources = (run: RunResources): RunResources => clone({ pilot: run
 export function newRun(mode: GameMode, seed: number, family: WeaponFamily = 'pulse'): RunState {
   const base: RunResources = { pilot: createInitialProgress(), family, tiers: { pulse: 1, spread: 1, lance: 1 }, magnet: 20, charge: 0 };
   return { ...base, mode, seed: seed >>> 0, stage: 1, lives: 3, continued: false, phase: 'briefing', checkpoint: resources(base),
-    cleared: false, bonusStatus: 'available', chain: { kills: 0, multiplier: 1, remaining: 0, recent: [] }, elapsed: 0, kills: 0, earlyCore: false };
+    cleared: false, bonusStatus: 'available', chain: { kills: 0, multiplier: 1, remaining: 0, recent: [] }, elapsed: 0,
+    timeRemaining: STAGE_TIME_LIMIT, timeBonus: null, kills: 0, earlyCore: false };
+}
+
+export function timeBonusSeconds(run: Pick<RunState, 'timeRemaining'>): number {
+  return Math.max(0, Math.floor(run.timeRemaining + 1e-6));
+}
+export function formatStageTime(run: Pick<RunState, 'timeRemaining'>): string {
+  const seconds = timeBonusSeconds(run);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+export function tickStageTime(run: RunState, dt: number): void {
+  if (run.timeBonus !== null || !['playing', 'cleared', 'recovery'].includes(run.phase) || !Number.isFinite(dt) || dt <= 0) return;
+  run.timeRemaining = Math.max(0, run.timeRemaining - dt);
+}
+export function settleTimeBonus(run: RunState): number | null {
+  if (!run.cleared || !['cleared', 'recovery'].includes(run.phase) || run.timeBonus !== null) return null;
+  const credits = timeBonusSeconds(run) * TIME_BONUS_RATE;
+  run.pilot.credits += credits;
+  run.timeBonus = credits;
+  return credits;
 }
 
 export function resetChain(run: RunState): void { run.chain = { kills: 0, multiplier: 1, remaining: 0, recent: [] }; }
@@ -94,15 +120,16 @@ export function settleStage(run: RunState): boolean {
   return true;
 }
 export function bonusFor(run: Pick<RunState, 'mode' | 'stage'>): BonusKind | null {
-  if (run.mode === 'journey') return run.stage === 3 ? 'asteroids' : run.stage === 7 ? 'canyon' : run.stage === 11 ? 'sequence' : null;
+  if (run.mode === 'journey') return run.stage < JOURNEY_STAGE_COUNT && run.stage % 4 === 3
+    ? (['asteroids', 'canyon', 'sequence'] as const)[Math.floor(run.stage / 4) % 3] : null;
   return run.stage % 5 === 0 ? (['asteroids', 'canyon', 'sequence'] as const)[(run.stage / 5 - 1) % 3] : null;
 }
-export function settleBonus(run: RunState, ratio: number): { medal: string; credits: number; score: number; extraLife: boolean } | null {
+export function settleBonus(run: RunState, ratio: number, targetScore?: number): { medal: string; credits: number; score: number; extraLife: boolean } | null {
   if (run.bonusStatus !== 'entered') return null;
   const value = Math.max(0, Math.min(1, ratio));
   const medal = value >= 0.9 ? 'GOLD' : value >= 0.65 ? 'SILVER' : value >= 0.35 ? 'BRONZE' : 'SALVAGE';
   const credits = value >= 0.9 ? 350 : value >= 0.65 ? 200 : value >= 0.35 ? 100 : Math.floor(value * 200);
-  const score = Math.floor(1500 * value);
+  const score = targetScore === undefined ? Math.floor(1500 * value) : Math.max(0, Math.floor(Number.isFinite(targetScore) ? targetScore : 0));
   const extraLife = medal === 'GOLD' && run.lives < 5;
   run.pilot.credits += credits;
   run.pilot.score += score;
@@ -147,6 +174,8 @@ export function retry(run: RunState, useContinue = false): void {
   }
   run.cleared = false;
   run.elapsed = 0;
+  run.timeRemaining = STAGE_TIME_LIMIT;
+  run.timeBonus = null;
   run.kills = 0;
   run.earlyCore = false;
   run.bonusStatus = 'available';
@@ -160,11 +189,13 @@ export function loseLife(run: RunState): void {
 }
 export function advance(run: RunState): void {
   if (!run.cleared) return;
-  if (run.mode === 'journey' && run.stage >= 12) { run.phase = 'victory'; return; }
+  if (run.mode === 'journey' && run.stage >= JOURNEY_STAGE_COUNT) { run.phase = 'victory'; return; }
   run.stage += 1;
   run.phase = 'briefing';
   run.cleared = false;
   run.elapsed = 0;
+  run.timeRemaining = STAGE_TIME_LIMIT;
+  run.timeBonus = null;
   run.kills = 0;
   run.earlyCore = false;
   run.bonusStatus = 'available';
@@ -173,6 +204,7 @@ export function advance(run: RunState): void {
   run.checkpoint = resources(run);
 }
 export function recordRun(profile: ProfileSaveV2, run: RunState): void {
+  if (run.practice) return;
   const key = `${run.mode}${run.continued ? 'Continued' : ''}` as keyof ProfileSaveV2['records'];
   profile.records[key] = Math.max(profile.records[key], run.pilot.score);
   if (run.stage >= 4 && run.cleared && !profile.unlocked.includes('spread')) profile.unlocked.push('spread');
@@ -188,6 +220,7 @@ export function freshProfile(legacy: unknown = null): ProfileSaveV2 {
     records: { journey: 0, endless: 0, journeyContinued: 0, endlessContinued: 0 }, checkpoints: {} };
 }
 export function saveCheckpoint(profile: ProfileSaveV2, run: RunState): void {
+  if (run.practice) return;
   const saved = clone(run);
   if (!saved.cleared && (saved.phase === 'playing' || saved.phase === 'briefing')) retry(saved);
   if (saved.phase === 'bonus') { saved.phase = 'shop'; saved.bonusStatus = 'settled'; }
@@ -211,6 +244,11 @@ export function parseProfile(raw: string | null, legacy: string | null): Profile
     for (const mode of ['journey', 'endless'] as const) {
       const run = parsed.checkpoints?.[mode];
       if (validCheckpoint(run, mode)) {
+        // Older v2 saves have no bonus clock. Completed gate travel is not paid retroactively.
+        if (run.timeRemaining === undefined) run.timeRemaining = Math.max(0, STAGE_TIME_LIMIT - (Number.isFinite(run.elapsed) ? Math.max(0, run.elapsed) : 0));
+        if (run.timeBonus === undefined) run.timeBonus = run.cleared && !['cleared', 'recovery'].includes(run.phase) ? 0 : null;
+        // A completed twelve-stage Journey can depart its old final dock into the expanded campaign.
+        if (mode === 'journey' && run.phase === 'victory' && run.stage < JOURNEY_STAGE_COUNT && run.cleared) run.phase = 'shop';
         run.chain.recent = Array.isArray(run.chain.recent) ? run.chain.recent.filter(age => Number.isFinite(age) && age >= 0 && age <= 5) : [];
         saveCheckpoint(profile, run);
       }
@@ -219,9 +257,12 @@ export function parseProfile(raw: string | null, legacy: string | null): Profile
   } catch { return fallback; }
 }
 function validCheckpoint(run: RunState | undefined, mode: GameMode): run is RunState {
-  if (!run || run.mode !== mode || !Number.isInteger(run.stage) || run.stage < 1 || (mode === 'journey' && run.stage > 12)) return false;
+  if (!run || run.mode !== mode || !Number.isInteger(run.stage) || run.stage < 1 || (mode === 'journey' && run.stage > JOURNEY_STAGE_COUNT)) return false;
+  if (run.practice !== undefined && run.practice !== false) return false;
   if (!['briefing', 'playing', 'cleared', 'recovery', 'bonusOffer', 'bonus', 'bonusResult', 'shop', 'gameover', 'victory'].includes(run.phase)) return false;
   if (!['available', 'entered', 'settled', 'skipped'].includes(run.bonusStatus) || typeof run.cleared !== 'boolean' || typeof run.continued !== 'boolean') return false;
+  if (run.timeRemaining !== undefined && (!Number.isFinite(run.timeRemaining) || run.timeRemaining < 0 || run.timeRemaining > STAGE_TIME_LIMIT)) return false;
+  if (run.timeBonus !== undefined && run.timeBonus !== null && (!Number.isInteger(run.timeBonus) || run.timeBonus < 0 || run.timeBonus > STAGE_TIME_LIMIT * TIME_BONUS_RATE || run.timeBonus % TIME_BONUS_RATE !== 0)) return false;
   const valid = (r: RunResources) => r && FAMILIES.includes(r.family) && FAMILIES.every(f => Number.isInteger(r.tiers?.[f]) && r.tiers[f] >= 1 && r.tiers[f] <= 3)
     && r.pilot && [r.pilot.score, r.pilot.credits, r.pilot.hull, r.pilot.shield, r.pilot.maxShield, r.magnet, r.charge].every(Number.isFinite)
     && r.pilot.credits >= 0 && r.pilot.hull >= 0 && r.pilot.hull <= 100 && r.pilot.shield >= 0 && r.pilot.maxShield >= 100 && r.pilot.maxShield <= 150

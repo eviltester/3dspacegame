@@ -19,6 +19,14 @@ interface Effect {
 
 // Short, clocked phrases: pulse channels and shift-register noise, like an arcade sound board.
 const EFFECTS = {
+  fracture: { duration: 0.19, voices: [
+    { wave: 'noise', notes: [8200, 4000, 1600, 900], level: 0.55, decay: 3.6 },
+    { wave: 'metal', notes: [410, 205, 102], level: 0.3, decay: 3 }
+  ] },
+  unlock: { duration: 0.64, voices: [
+    { wave: 'pulse', notes: [740, 0, 1110, 1480, 0, 2220, 1480, 2220], duty: 0.25, level: 0.3, gated: true, decay: 0.4 },
+    { wave: 'triangle', notes: [185, 370, 555, 740], level: 0.35, start: 0.32, duration: 0.32, decay: 1 }
+  ] },
   spread: { duration: 0.21, voices: [
     { wave: 'noise', notes: [6500, 4200, 1700, 900], level: 0.55, decay: 4 },
     { wave: 'pulse', notes: [630, 315, 157], duty: 0.33, level: 0.35, decay: 3 }
@@ -181,6 +189,8 @@ export class SoundBank {
   warp(): void { this.play('warp', 0.85); }
   reinforcements(): void { this.play('reinforcements', 0.95, true); }
   complete(): void { this.play('complete', 0.85); }
+  unlock(): void { this.play('unlock', 0.85); }
+  fracture(): void { this.play('fracture', 0.9); }
   gameOver(): void {
     for (const voice of this.voices) voice.stop();
     this.voices.clear();

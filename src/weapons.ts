@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 import type { WeaponFamily } from './arcade';
+import { FAMILIES } from './arcade';
+
+export type WeaponCommand = WeaponFamily | 'next';
+export function selectWeapon(current: WeaponFamily, command: WeaponCommand): WeaponFamily {
+  return command === 'next' ? FAMILIES[(FAMILIES.indexOf(current) + 1) % FAMILIES.length] : command;
+}
 
 export interface WeaponSpec { damage: number; cooldown: number; speed: number; spread: number; count: number; pierce: number; color: number; radius: number; length: number }
 const BASE: Record<WeaponFamily, WeaponSpec> = {

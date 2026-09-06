@@ -79,7 +79,7 @@ try {
  await page.evaluate(() => { window.vectorShooterDebug.primeBlast(); window.vectorShooterDebug.blast(); });
  assert.equal((await state()).wanted, false);
  for(const [id,hull] of friends)assert.equal((await state()).actors.find(a=>a.id===id).hull,hull);
- await page.mouse.click(720,450,{button:'middle'}); assert.equal((await state()).menu,'pause');
+ await page.mouse.click(720,450,{button:'middle',delay:700}); assert.equal((await state()).menu,'pause');
  const frozen=(await state()).elapsed; await step(10); assert.equal((await state()).elapsed,frozen);
  await action('unpause'); await page.waitForTimeout(100);
  await page.evaluate(()=>window.dispatchEvent(new Event('blur'))); assert.equal((await state()).menu,'pause');
@@ -106,7 +106,7 @@ try {
  await action('relaunch');await page.waitForTimeout(100);
  report.checks.push('death rollback, immediate relaunch and unlimited continue');
 
- for(let n=1;n<=12;n++){
+ for(let n=1;n<=99;n++){
   assert.equal((await state()).stage,n);
   if(n===3){
    const before=(await state()).position;
@@ -128,7 +128,7 @@ try {
   const reward=(await state()).credits;
   await finish();assert.equal((await state()).credits,reward);
   await warp();
-  if(n===12){assert.equal((await state()).menu,'victory');break;}
+  if(n===99){assert.equal((await state()).menu,'victory');break;}
   if([3,7,11].includes(n)){
    assert.equal((await state()).menu,'bonusOffer');
    const main=await state();
@@ -136,11 +136,15 @@ try {
    await snapshot('bonus-'+n);
    assert((await state()).bonus);
    await page.mouse.click(720,450,{button:'right'});
+   assert.equal((await state()).phase,'bonus');assert.equal((await state()).bonus.charge,0);
+   await page.mouse.click(720,450,{button:'middle',delay:700});
+   await page.locator('#screenContent [data-action="exitBonus"]').click();
    assert.equal((await state()).menu,'bonusResult');
    assert.equal((await state()).lives,main.lives);assert.equal((await state()).hull,main.hull);
    assert.equal((await state()).shield,main.shield);assert.deepEqual((await state()).tiers,main.tiers);
    await action('bonusDock');
   }
+  else if(n % 4 === 3) { assert.equal((await state()).menu,'bonusOffer'); await action('bonusSkip'); }
   assert.equal((await state()).menu,'shop');
   if(n===1){
    await action('equip:spread');
@@ -175,14 +179,14 @@ try {
   }
   report.journeys.push({mode:'endless',stage:n,verified:'wave, recovery / boss dock and bonus'});
  }
- await page.mouse.click(720,450,{button:'middle'});
+ await page.mouse.click(720,450,{button:'middle',delay:700});
  await action('title'); await page.reload();
  await action('mode:journey');
  assert.match(await page.locator('.record-line').innerText(),/CONTINUED/);
  await action('mode:endless');await action('resumeRun');await launch();
  assert.equal((await state()).stage,11);
  assert.equal((await state()).weapon,'lance');
- report.checks.push('twelve Journey stages, ten Endless waves, separate resumes, bonus isolation and single payouts');
+ report.checks.push('99 Journey stages, ten Endless waves, separate resumes, bonus isolation and single payouts');
 
  const bonusChecks = await page.evaluate(async () => {
   const { BonusController }=await import('/src/bonus.ts');
@@ -200,9 +204,9 @@ try {
    }
   }
   const b=new BonusController('sequence',41),c=new THREE.PerspectiveCamera(68,1,.1,6000);
-  c.lookAt(16.5,40.5,-206);b.shoot(c);
+  c.lookAt(new THREE.Vector3(...b.targetSequence.targets.find(t=>t.number===2).position));b.shoot(c);
   if(b.state.remaining!==58||b.state.nextMarker!==1)throw new Error('wrong marker penalty');
-  for(let i=0;i<16;i++){c.lookAt((i%4-1.5)*33,(1.5-Math.floor(i/4))*27,-170-(i%3)*18);b.shoot(c);}
+  for(let i=1;i<=16;i++){b.step(.2,{x:0,y:0},c);c.lookAt(new THREE.Vector3(...b.targetSequence.targets.find(t=>t.number===i).position));b.shoot(c);}
   if(b.state.nextMarker!==17||b.state.reason!=='complete')throw new Error('ordered markers failed');
   b.dispose();
   return result;

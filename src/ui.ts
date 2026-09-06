@@ -22,7 +22,7 @@ export class GameUI {
         <div id="viewport" class="viewport"></div>
         <div class="hud">
           <section class="hud-panel sector-panel"><div id="stageLabel" class="hud-label">JOURNEY</div><div id="sectorName" class="hud-value"></div><div id="reputation" class="hud-small"></div></section>
-          <section class="hud-panel mission-panel"><div id="missionTitle" class="hud-value"></div><div id="missionProgress" class="hud-small"></div></section>
+          <section class="hud-panel mission-panel"><div id="missionTitle" class="hud-value"></div><div id="missionProgress" class="hud-small"></div><div id="levelTimer" class="hud-small level-timer"><span id="levelClock"></span><span id="timeBonusReadout"></span></div></section>
           <section class="hud-panel cargo-panel"><div class="hud-label">SCORE</div><div id="scoreReadout" class="hud-value">000000</div><div id="creditReadout" class="hud-small"></div><div id="cargoReadout" class="hud-small"></div></section>
           <div id="reticle" class="reticle"><span></span><span></span><span></span><span></span></div>
           <div id="hitConfirm" class="hit-confirm">+</div>
@@ -30,11 +30,11 @@ export class GameUI {
           <div id="threatArrow" class="threat-arrow"></div>
           <div id="hitCallout" class="hit-callout"></div><div id="wantedBanner" class="wanted-banner">WANTED</div>
           <div id="messageLog" class="message-log"></div><div id="scorePopup" class="score-popup"></div>
-          <canvas id="radar" class="radar" width="180" height="180" aria-label="Radar"></canvas>
-          <div class="bottom-strip"><div><span class="hud-label">HULL</span><strong id="hullReadout"></strong></div><div><span class="hud-label">SHIELD</span><strong id="shieldReadout"></strong></div><div><span class="hud-label">WEAPON</span><strong id="weaponReadout"></strong></div><div><span class="hud-label">THROTTLE</span><strong id="speedReadout"></strong></div></div>
+          <canvas id="radar" class="radar" width="180" height="180" aria-label="Ship-relative 3D radar: contacts above or below the flight plane have vertical height lines"></canvas>
+          <div class="bottom-strip"><div><span class="hud-label">HULL</span><strong id="hullReadout"></strong></div><div><span class="hud-label">SHIELD</span><strong id="shieldReadout"></strong></div><div><span class="hud-label">WEAPON</span><strong id="weaponReadout"></strong></div><div><span id="speedLabel" class="hud-label">THROTTLE</span><strong id="speedReadout"></strong></div></div>
           <div class="arcade-strip"><span id="livesReadout"></span><span id="chainReadout"></span><span id="chargeReadout"></span></div>
         </div>
-        <div class="flight-buttons">${button('pause', '||', 'id="pauseButton" aria-label="Pause" title="Pause (middle mouse button)"')}${button('exitBonus', 'EXIT BONUS', 'id="bonusExitButton" hidden')}${button('nextWave', 'NEXT WAVE', 'id="nextWaveButton" hidden')}</div>
+        <div class="flight-buttons">${button('pause', '||', 'id="pauseButton" aria-label="Pause" title="Pause (Esc or hold wheel click)"')}${button('exitBonus', 'EXIT BONUS', 'id="bonusExitButton" hidden')}${button('nextWave', 'NEXT WAVE', 'id="nextWaveButton" hidden')}</div>
         <div id="damageLayer" class="damage-layer"></div><div id="warpLayer" class="warp-layer"></div>
         <div id="launchOverlay" class="launch-overlay">
           <div class="arcade-menu">
@@ -120,5 +120,6 @@ export class GameUI {
 export const CONTROLS = `<section class="controls-card"><h2>CONTROLS</h2><dl class="control-grid">
   <div><dt>MOUSE</dt><dd>Steer / aim</dd></div><div><dt>HOLD LEFT CLICK</dt><dd>Fire</dd></div>
   <div><dt>RIGHT CLICK</dt><dd>Charged blast</dd></div><div><dt>WHEEL / W / S</dt><dd>Forward / stop / reverse</dd></div>
-  <div><dt>MIDDLE / ESC</dt><dd>Pause</dd></div><div><dt>LEFT / RIGHT</dt><dd>Browse object scan</dd></div>
+  <div><dt>1 / 2 / 3</dt><dd>Pulse / Spread / Lance</dd></div><div><dt>TAB / WHEEL CLICK</dt><dd>Cycle weapon</dd></div>
+  <div><dt>HOLD WHEEL / ESC</dt><dd>Pause</dd></div><div><dt>LEFT / RIGHT</dt><dd>Browse object scan</dd></div>
   </dl></section>`;
