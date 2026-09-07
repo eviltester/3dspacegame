@@ -94,13 +94,13 @@ describe('projectile simulation', () => {
     callbacks.playerExpired.mockImplementation(shot => { penalty += tracker.end(shot.id, stats); });
     for (const x of [-20, 0, 20]) {
       system.spawn('player', -1, 0, new THREE.Vector3(x, 0, 0), new THREE.Vector3(0, 0, 1), 100, 12, 0xffffff, 1, 10, 1, 'spread');
-      tracker.begin(system.shots.at(-1)!.id, stats);
+      tracker.begin(system.shots.at(-1)!.id, stats, 1);
     }
     const alien = target(10, 50); alien.radius = 2;
     tick(0.5, [alien]); tick(1);
     expect(callbacks.damageActor).toHaveBeenCalledOnce();
-    expect(stats).toEqual({ shots: 3, hits: 1, misses: 2 }); expect(accuracyPercent(stats)).toBe(33); expect(penalty).toBe(10);
-    system.clear(); tick(); expect(penalty).toBe(10);
+    expect(stats).toEqual({ shots: 3, hits: 1, misses: 2 }); expect(accuracyPercent(stats)).toBe(33); expect(penalty).toBe(100);
+    system.clear(); tick(); expect(penalty).toBe(100);
   });
   it('does not report clears as natural misses or report NPC shots in player accuracy', () => {
     const { spawn, system, callbacks, tick } = fixture();

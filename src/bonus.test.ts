@@ -75,7 +75,7 @@ describe('bonus defensive blast', () => {
     expect(bonus.blast(camera)).toBe(true);
     expect(nearby.every(object => !object.visible)).toBe(true);
     expect(safe.every(object => object.visible)).toBe(true);
-    expect(bonus.state.points).toBe(nearby.length * 4 + obstacles.length);
+    expect(bonus.state.points).toBe(nearby.length * 200); expect(obstacles.every(obstacle => obstacle.used)).toBe(true);
     expect(bonus.state.finished).toBe(false);
     bonus.dispose();
   });
@@ -104,7 +104,7 @@ describe('bonus weapon families', () => {
     const count = bonus.root.children.length;
     expect(bonus.shoot(camera)).toBe(true);
     const fragments = bonus.rocks.filter(rock => rock.size < 2).length;
-    expect(bonus.root.children.length - count - fragments).toBe(weaponSpec(family, 1).count);
+    expect(bonus.root.children.length - count - fragments - bonus.repairs.drops.length).toBe(weaponSpec(family, 1).count);
     expect(rocks.filter(rock => !rock.visible).length).toBe(family === 'pulse' ? 1 : 3);
     expect(bonus.state.charge).toBe(5); expect(bonus.state.finished).toBe(false);
     bonus.dispose();

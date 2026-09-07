@@ -38,6 +38,17 @@ for (const width of [1440, 390]) {
       await game.step(0.4); await game.layout();
       await page.screenshot({ path: game.info.outputPath(`${mode}-flight-${width}.png`) });
       await game.screenshot(`${mode}-flight-${width}`);
+      if (mode === 'smuggler') {
+        // Arrange a paid result for layout only; timer/progression rules have direct tests.
+        await page.evaluate(() => window.vectorShooterDebug.finishBonus('complete')); await game.step(0);
+        const summary = page.locator('#courseSummary'); await expect(summary).toBeVisible();
+        await expect(summary).toContainText('SCORE'); await expect(summary).toContainText('LIVES 3');
+        for (const child of await summary.locator('h2,p').all()) {
+          const bounds = (await child.boundingBox())!;
+          expect(bounds.x).toBeGreaterThanOrEqual(0); expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        }
+        await page.screenshot({ path: game.info.outputPath(`course-summary-${width}.png`) });
+      }
       await game.pause(); await game.action('levelWarp');
     }
   });

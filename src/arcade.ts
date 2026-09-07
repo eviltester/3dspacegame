@@ -21,8 +21,8 @@ export type WeaponFamily = 'pulse' | 'spread' | 'lance';
 export type EnemyArchetype = 'raider' | 'flanker' | 'diver' | 'gunship' | 'minelayer' | 'carrier';
 export type BonusKind = 'asteroids' | 'canyon' | 'sequence';
 export type RunPhase = 'briefing' | 'playing' | 'cleared' | 'recovery' | 'bonusOffer' | 'bonus' | 'bonusResult' | 'shop' | 'gameover' | 'victory';
-// Only equipment and spendable/earned resources roll back on a retry.
-// Lives and continue status live outside this snapshot so death cannot undo itself.
+// Equipment and spendable resources roll back on a retry; the run's score is
+// restored separately so losing a life never removes points already earned.
 export interface RunResources {
   pilot: PlayerProgress;
   family: WeaponFamily;
@@ -37,6 +37,8 @@ export interface RunState extends RunResources {
   nextLifeScore: number;
   /** Last delivered haul, retained so a resumed result screen can show it again. */
   stageReward: number;
+  /** Delivered canyon pickups, for the paid three-second summary; null on other legs. */
+  stageHaul: number | null;
   /** Per-wave projectile results, retained on cleared checkpoints. */
   accuracy: WaveAccuracy;
   practice?: boolean;
@@ -86,7 +88,7 @@ export const resources = (run: RunResources): RunResources => clone({ pilot: run
 export function newRun(mode: GameMode, seed: number, family: WeaponFamily = 'pulse'): RunState {
   const base: RunResources = { pilot: createInitialProgress(), family, tiers: { pulse: 1, spread: 1, lance: 1 }, magnet: 20, charge: 0 };
   return { ...base, mode, id: `${mode}-${seed}`, nextLifeScore: lifeScoreInterval(mode), stageReward: 0, seed: seed >>> 0, stage: 1, lives: 3, continued: false, phase: 'briefing', checkpoint: resources(base),
-    cleared: false, bonusStatus: 'available', chain: { kills: 0, multiplier: 1, remaining: 0, recent: [] }, elapsed: 0,
+    cleared: false, stageHaul: null, bonusStatus: 'available', chain: { kills: 0, multiplier: 1, remaining: 0, recent: [] }, elapsed: 0,
     timeRemaining: STAGE_TIME_LIMIT, timeBonus: null, kills: 0, earlyCore: false, accuracy: emptyAccuracy() };
 }
 
@@ -164,14 +166,14 @@ export function bonusFor(run: Pick<RunState, 'mode' | 'stage'>): BonusKind | nul
     ? (['asteroids', 'canyon', 'sequence'] as const)[Math.floor(run.stage / 4) % 3] : null;
   return run.stage % 5 === 0 ? (['asteroids', 'canyon', 'sequence'] as const)[(run.stage / 5 - 1) % 3] : null;
 }
-export function settleBonus(run: RunState, ratio: number, targetScore?: number): { medal: string; credits: number; score: number; extraLife: boolean } | null {
-  // Only an entered, unpaid offer can settle. Target challenges supply their net
-  // score after shot penalties; other bonus courses use their completion ratio.
+export function settleBonus(run: RunState, ratio: number, courseScore?: number): { medal: string; credits: number; score: number; extraLife: boolean } | null {
+  // Only an entered, unpaid offer can settle. Canyon and target challenges supply
+  // their net points; asteroid bonuses use their completion ratio.
   if (run.bonusStatus !== 'entered') return null;
   const value = Math.max(0, Math.min(1, ratio));
   const medal = value >= 0.9 ? 'GOLD' : value >= 0.65 ? 'SILVER' : value >= 0.35 ? 'BRONZE' : 'SALVAGE';
   const credits = value >= 0.9 ? 350 : value >= 0.65 ? 200 : value >= 0.35 ? 100 : Math.floor(value * 200);
-  const score = targetScore === undefined ? Math.floor(1500 * value) : Math.max(0, Math.floor(Number.isFinite(targetScore) ? targetScore : 0));
+  const score = courseScore === undefined ? Math.floor(1500 * value) : Math.max(0, Math.floor(Number.isFinite(courseScore) ? courseScore : 0));
   const extraLife = medal === 'GOLD' && run.lives < 5;
   run.pilot.credits += credits;
   run.pilot.score += score;
@@ -211,7 +213,9 @@ export function purchase(run: RunState, kind: Purchase): boolean {
 }
 /** Restore the checkpoint without charging a life; loseLife handles that separately. */
 export function retry(run: RunState, useContinue = false): void {
+  const score = run.pilot.score;
   Object.assign(run, resources(run.checkpoint));
+  run.pilot.score = score;
   if (useContinue) {
     // Reset both copies of the score, otherwise another death could resurrect
     // pre-continue points from the checkpoint.
@@ -229,6 +233,7 @@ export function retry(run: RunState, useContinue = false): void {
   run.accuracy = emptyAccuracy();
   run.earlyCore = false;
   run.stageReward = 0;
+  run.stageHaul = null;
   run.bonusStatus = 'available';
   run.phase = 'briefing';
   resetChain(run);
@@ -259,6 +264,7 @@ export function advance(run: RunState): void {
   run.accuracy = emptyAccuracy();
   run.earlyCore = false;
   run.stageReward = 0;
+  run.stageHaul = null;
   run.bonusStatus = 'available';
   run.pilot.wanted = createInitialProgress().wanted;
   if (run.mode !== 'invaders') run.pilot.shield = Math.min(run.pilot.maxShield, run.pilot.shield + 25);
@@ -326,6 +332,7 @@ export function parseProfile(raw: string | null, legacy: string | null): Profile
         if (run.nextLifeScore % lifeInterval !== 0) run.nextLifeScore = Math.max(Math.ceil(run.nextLifeScore / lifeInterval), Math.floor(run.pilot.score / lifeInterval) + 1) * lifeInterval;
         if (mode === 'invaders' && run.cleared && run.phase === 'shop') run.phase = 'recovery';
         if (run.stageReward === undefined) run.stageReward = 0;
+        if (run.stageHaul === undefined) run.stageHaul = null;
         // Default missing clocks without paying for already-completed gate travel.
         if (run.timeRemaining === undefined) run.timeRemaining = Math.max(0, STAGE_TIME_LIMIT - (Number.isFinite(run.elapsed) ? Math.max(0, run.elapsed) : 0));
         if (run.timeBonus === undefined) run.timeBonus = run.cleared && !['cleared', 'recovery'].includes(run.phase) ? 0 : null;
@@ -344,7 +351,8 @@ function validCheckpoint(run: RunState | undefined, mode: GameMode): run is RunS
   if (!run || run.mode !== mode || !Number.isInteger(run.stage) || run.stage < 1 || (mode === 'journey' && run.stage > JOURNEY_STAGE_COUNT)) return false;
   if (run.practice !== undefined && run.practice !== false) return false;
   if (run.nextLifeScore !== undefined && (!Number.isSafeInteger(run.nextLifeScore) || run.nextLifeScore < SMUGGLER_EXTRA_LIFE_SCORE || run.nextLifeScore % SMUGGLER_EXTRA_LIFE_SCORE !== 0)) return false;
-  if (run.stageReward !== undefined && (!Number.isSafeInteger(run.stageReward) || run.stageReward < 0)) return false;
+  if (run.stageReward !== undefined && !Number.isSafeInteger(run.stageReward)) return false;
+  if (run.stageHaul !== undefined && run.stageHaul !== null && (!Number.isSafeInteger(run.stageHaul) || run.stageHaul < 0)) return false;
   if (!['briefing', 'playing', 'cleared', 'recovery', 'bonusOffer', 'bonus', 'bonusResult', 'shop', 'gameover', 'victory'].includes(run.phase)) return false;
   if (!['available', 'entered', 'settled', 'skipped'].includes(run.bonusStatus) || typeof run.cleared !== 'boolean' || typeof run.continued !== 'boolean') return false;
   if (run.timeRemaining !== undefined && (!Number.isFinite(run.timeRemaining) || run.timeRemaining < 0 || run.timeRemaining > STAGE_TIME_LIMIT)) return false;

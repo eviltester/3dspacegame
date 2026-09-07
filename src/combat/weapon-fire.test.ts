@@ -45,7 +45,7 @@ it('leaves cooldown ready when the pool rejects all bolts and counts a partial v
 
 it('gives Spread three separately tracked shots: one hit and two misses', () => {
   const fire = new WeaponFire(), tracker = new ShotAccuracy(), stats = emptyAccuracy();
-  fire.fire(weaponSpec('spread', 1, 'invaders'), index => { tracker.begin(index, stats); return true; });
-  tracker.hit(1, stats); expect(tracker.finish(stats)).toBe(10);
+  fire.fire(weaponSpec('spread', 1, 'invaders'), index => { tracker.begin(index, stats, 8); return true; });
+  tracker.hit(1, stats); expect(tracker.finish(stats)).toBe(150);
   expect(stats).toEqual({ shots: 3, hits: 1, misses: 2 });
 });

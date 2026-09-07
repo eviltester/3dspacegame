@@ -8,7 +8,7 @@ test('Ships & Objects renders every model with keyboard and mouse navigation', a
   await page.locator('[data-action="scanNext"]').click();
   expect((await game.state()).briefingCount).not.toBe(initial);
   await page.keyboard.press('ArrowLeft'); expect((await game.state()).briefingCount).toBe(initial);
-  const count = Number((await game.state()).briefingCount?.split('/')[1]); expect(count).toBe(29);
+  const count = Number((await game.state()).briefingCount?.split('/')[1]); expect(count).toBe(31);
   for (let i = 0; i < count; i++) {
     await page.locator('[data-action="scanNext"]').click();
     await expect(page.locator('#modelTitle')).not.toBeEmpty(); await expect(page.locator('#modelDescription')).not.toBeEmpty();

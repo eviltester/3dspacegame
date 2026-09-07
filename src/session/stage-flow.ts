@@ -5,6 +5,7 @@ import type { BonusRunState } from '../bonus';
 import { awardScoreLives } from '../life-rewards';
 import { settleSmugglerLeg } from '../smuggler';
 import type { ShotAccuracy } from '../combat/accuracy';
+import { canyonHaulPoints } from '../canyon-combat';
 
 export function completeEncounter(run: RunState, accuracy: ShotAccuracy) {
   if (run.phase !== 'playing') return null;
@@ -28,12 +29,12 @@ export function nextStage(run: RunState, inCourse = false) {
   advance(run);
   return { route: run.phase === 'victory' ? 'victory' as const : 'briefing' as const, timeBonus };
 }
-export function resumeDestination(run: RunState): 'gameover' | 'briefing' | 'smugglerResult' | 'shop' | 'bonusOffer' {
+export function resumeDestination(run: RunState): 'gameover' | 'briefing' | 'intermission' | 'shop' | 'bonusOffer' {
   if (run.phase === 'gameover') {
     if (!run.lives) return 'gameover';
     retry(run); return 'briefing';
   }
-  if (run.mode === 'smuggler' && run.cleared) return 'smugglerResult';
+  if (run.mode === 'smuggler' && run.cleared) return 'intermission';
   if (run.phase === 'shop' || run.phase === 'bonusResult') return 'shop';
   return run.phase === 'bonusOffer' ? 'bonusOffer' : 'briefing';
 }
@@ -42,13 +43,14 @@ export function enterBonus(run: RunState) {
   if (!kind || run.bonusStatus !== 'available' || run.phase !== 'bonusOffer') return null;
   run.bonusStatus = 'entered'; run.phase = 'bonus'; return kind;
 }
-export type CourseOutcome = Pick<BonusRunState, 'finished' | 'reason' | 'points' | 'health' | 'difficulty' | 'kind'>;
+export type CourseOutcome = Pick<BonusRunState, 'finished' | 'reason' | 'points' | 'health' | 'difficulty' | 'kind' | 'haul'>;
 export function settleCourse(run: RunState, state: CourseOutcome, ratio: number) {
   if (!state.finished) return null;
   if (run.mode === 'smuggler') {
     const result = settleSmugglerLeg(run, state);
     return result ? { kind: 'smuggler' as const, ...result } : null;
   }
-  const result = settleBonus(run, ratio, state.kind === 'sequence' ? state.points : undefined);
+  const haulPoints = state.kind === 'canyon' && state.reason === 'complete' ? canyonHaulPoints(state.haul) : 0;
+  const result = settleBonus(run, ratio, state.kind === 'asteroids' ? undefined : state.points + haulPoints);
   return result ? { kind: 'bonus' as const, ...result } : null;
 }

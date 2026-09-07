@@ -15,7 +15,7 @@ import { FrontMenus } from './front';
 import { SmugglerMenus } from './smuggler';
 import { MODE_INFO } from '../modes';
 import { WEAPON_HELP, weaponSpec } from '../weapons';
-import { INVADER_MISS_COST } from '../combat/accuracy';
+import { invaderMissCost } from '../combat/accuracy';
 import { CONTROL_LAYOUTS } from '../input-layouts';
 import type { ControlScheme } from '../input-layouts';
 
@@ -50,7 +50,7 @@ export class MenuViews {
     return ['briefing', definition.title.replace(/\d+/g, '').trim(), `${MODE_INFO[run.mode].name} / ${MODE_INFO[run.mode].unit} ${run.stage}${run.mode === 'journey' ? ` / ${JOURNEY_STAGE_COUNT}` : ''}`, `
       <section class="mission-briefing"><p class="briefing-status">MISSION BRIEFING</p><h2 id="missionBriefTitle">${definition.title}</h2><p id="missionBriefObjective">${objective}</p><p id="missionBriefCaution">${caution}</p><p id="missionBriefReward">REWARD CR ${200 + Math.min(20, run.stage) * 35 + (run.stage === 1 ? 150 : 0)}</p></section>
       <p class="menu-description">TIME BONUS: ${formatStageTime(run)} remaining. ${TIME_BONUS_RATE} CR per whole second left ${run.mode === 'invaders' || (run.mode === 'endless' && run.stage % 5 !== 0) ? 'when the next wave starts' : 'at the Warp Gate'}. Zero ends the bonus, not the mission.</p>
-      ${run.mode === 'invaders' ? `<p class="menu-description">Every missed bolt costs ${INVADER_MISS_COST} points. Spread fires three separately scored bolts; alien hits and interceptions count toward wave accuracy. Aliens take firing turns and recover faster as waves advance.</p><p class="menu-description">Extra life every 20,000 points, up to five lives. Collect repair cells for +30 hull and +30 shield. Weapon cores upgrade your equipped weapon. Respawn shields last three seconds.</p><p class="run-loadout">COOLDOWNS: ${FAMILIES.map(f => `${f.toUpperCase()} ${weaponSpec(f, run.tiers[f], run.mode).cooldown.toFixed(2)}s`).join(' / ')}</p>` : ''}
+      ${run.mode === 'invaders' ? `<p class="menu-description">MISS COST: 11+ aliens -${invaderMissCost(11)} / 6-10 aliens -${invaderMissCost(6)} / 0-5 aliens -${invaderMissCost(5)} points per bolt, counted when fired. Spread fires three separately scored bolts; alien hits and interceptions count toward wave accuracy. Aliens take firing turns and recover faster as waves advance.</p><p class="menu-description">Extra life every 20,000 points, up to five lives. Repair drops have a 1-in-15 chance and restore +30 hull and +30 shield. Alien hits cost 10 shield or 20 unshielded hull. Weapon cores upgrade your equipped weapon. Respawn shields last three seconds.</p><p class="run-loadout">COOLDOWNS: ${FAMILIES.map(f => `${f.toUpperCase()} ${weaponSpec(f, run.tiers[f], run.mode).cooldown.toFixed(2)}s`).join(' / ')}</p>` : ''}
       <p class="run-loadout">${run.lives} LIVES / ${run.family.toUpperCase()} ${run.tiers[run.family]} / ${definition.waves.length} ${run.mode === 'invaders' ? 'ALIEN' : 'PIRATE'} FLIGHTS</p>
       <div class="menu-actions">${button('launch', 'START MISSION', 'id="launchButton"')}${warpBackButton(run)}${button('title', 'TITLE SCREEN')}</div>`];
   }

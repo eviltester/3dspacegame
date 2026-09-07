@@ -5,6 +5,20 @@ import { createEnemyModel } from '../../../src/models/ships';
 import { ShipExplosions } from '../../../src/rendering/ship-explosions';
 import { BonusController } from '../../../src/bonus';
 import type { BonusKind } from '../../../src/arcade';
+import { createCanyonGate } from '../../../src/models/landmarks';
+import { updateCanyonGateVisual } from '../../../src/rendering/canyon-gates';
+
+/** Inspect the actual warning material at fixed phases, without simulating misses. */
+export function canyonGatePreview(): string[] {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setSize(360, 260);
+  const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(50, 360 / 260, 0.1, 200);
+  const gate = createCanyonGate(); gate.position.z = -45; scene.add(gate);
+  const frames = ([[false, 0], [true, Math.PI / 6], [true, Math.PI / 18], [false, 0]] as const).map(([warning, time]) => {
+    updateCanyonGateVisual(gate, warning, time);
+    renderer.render(scene, camera); return renderer.domElement.toDataURL();
+  });
+  disposeObject(gate); renderer.dispose(); renderer.forceContextLoss(); return frames;
+}
 
 export function projectilePreviews(): { family: string; bright: string; dim: string }[] {
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setSize(360, 260);

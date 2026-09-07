@@ -2,6 +2,16 @@ import { test, expect } from './fixtures/game';
 import { PNG } from 'pngjs';
 import { ASTEROID_COLORS } from '../../src/models/primitives';
 
+function greenPixels(frame: string) {
+  const { data } = PNG.sync.read(Buffer.from(frame.split(',')[1], 'base64'));
+  let pureGreen = 0, brightness = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 1] > 60 && data[i + 1] > data[i] * 2 && data[i + 1] > data[i + 2] * 3) pureGreen++;
+    brightness += data[i + 1];
+  }
+  return { pureGreen, brightness };
+}
+
 for (const width of [1440, 390]) {
   test(`asteroid canvas at ${width}px renders distinct colours and motion`, async ({ game, page }) => {
     await game.openRenderer();
@@ -36,7 +46,17 @@ for (const kind of ['canyon', 'sequence'] as const) {
     let lit = 0;
     for (let i = 0; i < png.data.length; i += 4) if (Math.max(png.data[i], png.data[i + 1], png.data[i + 2]) > 60) lit++;
     expect(lit).toBeGreaterThan(300);
-    if (kind === 'canyon') expect(frames[1]).not.toBe(frames[0]);
+    if (kind === 'canyon') {
+      expect(frames[1]).not.toBe(frames[0]);
+      const gates = await page.evaluate(async path => {
+        const { canyonGatePreview } = await import(path) as typeof import('./fixtures/rendering');
+        return canyonGatePreview();
+      }, '/tests/e2e/fixtures/rendering.ts');
+      expect(greenPixels(gates[2]).pureGreen).toBeGreaterThan(greenPixels(gates[0]).pureGreen + 100);
+      expect(greenPixels(gates[2]).brightness).toBeGreaterThan(greenPixels(gates[1]).brightness * 1.2);
+      expect(gates[3]).toBe(gates[0]);
+      await game.info.attach('canyon-gate-warning', { body: Buffer.from(gates[2].split(',')[1], 'base64'), contentType: 'image/png' });
+    }
     await game.info.attach(kind, { body: buffer, contentType: 'image/png' });
   });
 }

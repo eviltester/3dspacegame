@@ -30,6 +30,7 @@ export class MenuShell {
           <div class="arcade-strip"><span id="livesReadout"></span><span id="chainReadout"></span><span id="chargeReadout"></span></div>
         </div>
         <div class="flight-buttons">${button('pause', '||', 'id="pauseButton" aria-label="Pause" title="Pause (Esc or hold wheel click)"')}${button('exitBonus', 'EXIT BONUS', 'id="bonusExitButton" hidden')}${button('nextWave', 'NEXT WAVE', 'id="nextWaveButton" hidden')}</div>
+        <section id="courseSummary" class="course-summary" role="status" aria-label="Level complete" hidden><h2>HAUL DELIVERED</h2><p id="courseHaul" hidden></p><p id="courseScore"></p><p id="courseLives"></p><p id="courseNext"></p></section>
         <div id="damageLayer" class="damage-layer"></div><div id="protectionLayer" class="protection-layer" hidden></div><div id="warpLayer" class="warp-layer"></div>
         <div id="launchOverlay" class="launch-overlay">
           <div class="arcade-menu">

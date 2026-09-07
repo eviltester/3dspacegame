@@ -51,17 +51,17 @@ Course weapons currently use an immediate ray test with separate visual bolts. T
 
 ## Checkpoints And Rewards
 
-`RunState` holds current equipment and a separate deep copy of the resources available at the start of the stage. A retry restores that copy. Lives and continued status are outside it so restoring equipment cannot undo a death.
+`RunState` holds current equipment and a separate deep copy of the resources available at the start of the stage. A retry restores equipment and spendable resources but preserves the current score, including deductions. Lives and continued status are outside the snapshot so restoring equipment cannot undo a death. Only new games and explicit continues clear the score.
 
 `FlightLifecycle` owns damage acceptance, pause and life-transition decisions. It uses `loseCombatLife` to preserve an ongoing fight, or `loseLife` to roll back a failed objective. It returns a queued respawn, consumed once at the next simulation step after collision callbacks finish. Its three-second protection timer is authoritative; the renderer reads that timer to colour the ship. Only zero lives opens a game-over menu. The controller also owns its countdown. Continuing grants three lives and clears both current and checkpoint score; otherwise a checkpoint restart could restore pre-continue points.
 
 `encounterComplete` takes only objective state: remaining hostiles/flights, rescue delivery and protected-ship status. `completeEncounter` settles a completed stage and returns either recovery or gate travel. `afterGate`, `nextStage`, `resumeDestination` and `settleCourse` own the subsequent destinations and once-only payments. `ArcadeGame` displays those results; it does not duplicate their rules. These contracts can be exercised by arranging state in a unit test, without constructing a scene or advancing a whole game.
 
-`awardScoreLives` consumes score milestones stored outside the retry resources: 20,000 points in Invaders and 5,000 banked points in Smuggler Run. Consuming milestones at the five-life cap, and never rewinding them after penalties or retries, prevents repeated awards.
+`awardScoreLives` consumes score milestones stored outside the retry resources: 20,000 points in Invaders and 5,000 points in Smuggler Run. Smuggler checks at flight settlement, including crashes. Consuming milestones at the five-life cap, and never rewinding them after penalties or retries, prevents repeated awards.
 
 Completing a stage marks `cleared` before further completion calls can award anything again. Time bonuses distinguish `null` (not paid) from `0` (paid with no time remaining). Bonus offers likewise track available, entered, settled and skipped states. These markers prevent repeated callbacks or resumed screens from paying twice.
 
-Advancing banks the completed stage and dock purchases into the next stage's retry baseline. Saving during a fight stores a restartable checkpoint, not positions of every ship and shot. `saveCheckpoint` works on a clone so saving does not reset the live game. Reloading an interrupted optional bonus cannot replay its payout; interrupted Smuggler legs restart without banking unfinished cargo.
+Advancing banks the completed stage and dock purchases into the next stage's retry baseline. Saving during a fight stores a restartable checkpoint, not positions of every ship and shot. `saveCheckpoint` works on a clone so saving does not reset the live game. Reloading an interrupted optional bonus cannot replay its payout. `smugglerCheckpoint` projects the current flight subtotal into a cloned save, preserving displayed score on reload without mutating the live flight or counting its subtotal twice.
 
 Persistence is local-only. `ArcadeGame.persist` writes `vector-shooter-save-v2`; `parseProfile` validates stored profiles and supplies defaults for missing fields. Level Warp runs are marked `practice` and must not update real checkpoints, records or permanent unlocks.
 
@@ -71,7 +71,17 @@ Persistence is local-only. `ArcadeGame.persist` writes `vector-shooter-save-v2`;
 
 In Journey and Attack Challenge these are optional sorties. Completion, failure or early exit settles partial rewards once and leaves the main ship and lives intact.
 
-In Smuggler Run the same courses are the main missions. Only reaching the exit banks the haul; failure costs a life and rolls back the leg. Score thresholds award lives from banked points, including consuming thresholds while already at the five-life cap. Sharing the course controller does not mean sharing the reward or failure rules.
+In Smuggler Run the same courses are the main missions. Every finished flight retains its earned score; only reaching the exit adds a delivery bonus. Crashes and missed exits cost a life and restart the route. `smugglerFlightPoints` converts asteroid salvage units into score while leaving canyon gate rewards/penalties at face value. Settlement and the HUD share this conversion.
+
+`CanyonGateScore` owns the 50/100/100/200 reward table and the recoverable 200-point penalty steps. `CanyonCourse` calls it once per swept gate crossing. Gate misses cannot end the course. The next opening's pulse reads the penalty without changing its geometry. `BonusController` rejects blast-charge gains while the canyon penalty is positive; the HUD projects the same value into the counter and charging status.
+
+`CourseIntermission` measures three simulation seconds between completed Smuggler legs. `ArcadeGame` pauses normal simulation during the summary but keeps pointer lock, then starts the next course directly. The usual lifecycle pause freezes this timer. Paid checkpoints resume through the same path without resettling rewards.
+
+`CanyonHaul` owns yellow drops, swept collection and radar contacts; it never awards points. A separate random stream gives shot crates their 1/5 chance without changing course layouts or repair rolls. The collected count stays in `BonusRunState.haul` until EXIT settlement. `RunState.stageHaul` saves only the paid count for the summary; older saves default it to null. Failed/restarted flights retain earned score, not undelivered cargo. The existing phase/cleared guards prevent duplicate conversion after a save or repeated completion event.
+
+`canyon-combat.ts` contains the pure shield, impact and reward rules. `CanyonCourse` reports individual gun impacts separately from walls/solid obstacles. `BonusController` applies a short grace interval only to sustained physical contact; each gun bolt consumes 20 shield, with hull loss only when the shield was already empty. Repair pickup events also refill canyon shields. These skiff values are separate from the main ship's shields and hull.
+
+`skiffRepairDrop` uses thirty equal probability slots to express the 1/15 and 1/30 drop rates. `SkiffRepairDrops` owns pickup models, swept collection, expiry and radar contacts. Its random stream is separate from course/fragment generation. The course calls it only for shot-destroyed rocks, salvage and guns. Canyon fire counts misses per ray-tested projectile, not per trigger pull; a piercing hit or intercepted bolt prevents that projectile's 50-point deduction.
 
 ## Where To Make Changes
 

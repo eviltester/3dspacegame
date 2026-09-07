@@ -8,8 +8,11 @@ import { Random } from './encounters';
 import { bonusProfile } from './bonus-difficulty';
 import { createBoltModel, createCanyonGate, createCanyonTurret, createTextSprite, disposeObject, edgesFromGeometry, lineShape } from './models';
 import { sweptHit } from './weapons';
+import { CanyonGateScore, canyonGatePoints } from './canyon-gates';
+import { updateCanyonGateVisual } from './rendering/canyon-gates';
+import type { CanyonImpact } from './canyon-combat';
 
-export type CanyonEnd = 'complete' | 'missedGates' | 'wall';
+export type CanyonEnd = 'complete' | 'wall';
 export interface CanyonTarget {
   kind: 'turret' | 'obstacle' | 'hostileBolt'; object: THREE.Object3D; radius: number; number: number; used: boolean;
 }
@@ -17,7 +20,7 @@ interface Gun extends CanyonTarget { cooldown: number; windup: number; aim: THRE
 interface Bolt extends CanyonTarget { velocity: THREE.Vector3; life: number }
 export interface CanyonGate {
   object: THREE.Group; base: THREE.Vector3; previous: THREE.Vector3; radius: number; phase: number;
-  motion: number; progress: number; resolved: boolean; passed: boolean; exit: boolean;
+  motion: number; small: boolean; progress: number; resolved: boolean; passed: boolean; exit: boolean;
 }
 export const CANYON_GATES = 18;
 export const CANYON_GUN_WARNING = 0.85;
@@ -41,6 +44,10 @@ export class CanyonCourse {
   readonly gates: CanyonGate[] = [];
   readonly targets: CanyonTarget[] = [];
   readonly offset = new THREE.Vector2();
+  readonly gateScore = new CanyonGateScore();
+  get penalty(): number { return this.gateScore.penalty; }
+  get gatePointsAvailable(): number { return this.gates.filter(gate => !gate.exit).reduce((sum, gate) => sum + canyonGatePoints(gate), 0); }
+  get nextGatePoints(): number { const gate = this.gates.find(gate => !gate.resolved); return gate && !gate.exit ? canyonGatePoints(gate) : 0; }
   private guns: Gun[] = [];
   shots: Bolt[] = [];
   progress = 0;
@@ -69,9 +76,12 @@ export class CanyonCourse {
         [n.x - 43, n.y - 32, n.z], [n.x - 50, n.y + 42, n.z], [n.x + 43, n.y - 32, n.z], [n.x + 50, n.y + 42, n.z]
       ], [[0, 1], [2, 3], [0, 2], [0, 4], [1, 5], [2, 6], [3, 7]], 0x508bc6, 0.65));
     }
+    // Four half-size openings, spread across the course, with seeded positions.
+    const smallSlots = new Set([3, 7, 11, 15].map(start => start + rng.pick([0, 1, 2])));
     for (let i = 0; i <= CANYON_GATES; i++) {
       const exit = i === CANYON_GATES, progress = exit ? 0.985 : 0.055 + i * 0.05;
-      const radius = exit ? 10 : (18 - i * 0.6 + (i % 2 ? -0.6 : 0.4)) * profile.gateScale;
+      const small = !exit && smallSlots.has(i);
+      const radius = exit ? 10 : (18 - i * 0.6 + (i % 2 ? -0.6 : 0.4)) * profile.gateScale * (small ? 0.5 : 1);
       const base = this.path.getPointAt(progress).add(new THREE.Vector3(exit ? 0 : Math.sin(i * 1.35) * 16, exit ? 1 : Math.cos(i * 1.1) * 9, 0));
       const object = createCanyonGate(radius);
       object.position.copy(base); this.root.add(object);
@@ -79,7 +89,7 @@ export class CanyonCourse {
       label.position.set(0, radius + (exit ? 23 : 7), 4); object.add(label);
       if (exit) object.add(lineShape([[0, radius + 14, 4], [0, radius + 2, 4], [-4, radius + 6, 4], [4, radius + 6, 4]], [[0, 1], [1, 2], [1, 3]], 0xffff70));
       this.gates.push({ object, base, previous: base.clone(), radius, phase: rng.range(0, Math.PI * 2),
-        motion: exit ? 0 : 1.5 + i * 0.22, progress, resolved: false, passed: false, exit });
+        motion: exit || i % 3 === 0 ? 0 : 1.5 + i * 0.22, small, progress, resolved: false, passed: false, exit });
       if (exit) this.addEndWall(base, radius);
     }
     // Obstacles occupy alternating outer lanes; the central gate corridor remains traversable.
@@ -107,8 +117,8 @@ export class CanyonCourse {
     }
     const wall = lineShape(vertices, edges, 0xffbf48); wall.position.copy(center); this.root.add(wall);
   }
-  step(dt: number, look: { x: number; y: number; boost?: boolean }, camera: THREE.PerspectiveCamera): { damage: boolean; points: number; notice: string; end: CanyonEnd | null; shots: number } {
-    const events = { damage: false, points: 0, notice: '', end: null as CanyonEnd | null, shots: 0 };
+  step(dt: number, look: { x: number; y: number; boost?: boolean }, camera: THREE.PerspectiveCamera): { damage: CanyonImpact[]; points: number; notice: string; end: CanyonEnd | null; shots: number } {
+    const events = { damage: [] as CanyonImpact[], points: 0, notice: '', end: null as CanyonEnd | null, shots: 0 };
     this.elapsed += dt; this.previous.copy(camera.position);
     this.boosting = look.boost === true; this.speed = canyonSpeed(this.progress, this.boosting, this.profile.level);
     this.distance += this.speed * dt; this.progress = Math.min(1, this.distance / this.length);
@@ -118,7 +128,7 @@ export class CanyonCourse {
     camera.position.copy(center).add(new THREE.Vector3(this.offset.x, this.offset.y, 0));
     camera.lookAt(this.path.getPointAt(Math.min(1, this.progress + 0.015)).add(new THREE.Vector3(this.offset.x, this.offset.y, 0)));
     camera.rotateZ(-this.offset.x * 0.002);
-    events.damage = Math.abs(this.offset.x) > 36 || this.offset.y < -22;
+    if (Math.abs(this.offset.x) > 36 || this.offset.y < -22) events.damage.push('wall');
     for (const gate of this.gates) {
       gate.previous.copy(gate.object.position);
       gate.object.position.copy(gate.base).add(new THREE.Vector3(Math.sin(this.elapsed * this.profile.motionScale * 0.9 + gate.phase) * gate.motion,
@@ -127,21 +137,22 @@ export class CanyonCourse {
       const pass = canyonGateCrossing(this.previous, camera.position, gate);
       if (pass === null) continue;
       gate.resolved = true; gate.passed = pass;
-      // Each plane crossing is final. A valid green gate resets the miss streak;
-      // the last gate is an exit aperture, whose miss is a wall collision instead.
+      // Ordinary misses cost points only. The final exit remains a wall aperture.
       if (gate.exit) { events.end = pass ? 'complete' : 'wall'; break; }
       this.nextGate++;
-      if (pass) { this.passed++; this.missed = 0; events.points += 5; }
-      else {
-        this.missed++;
-        events.notice = this.missed >= 2 ? 'TWO GATES MISSED / SORTIE ENDED' : 'GATE MISSED / NEXT GATE REQUIRED';
-        if (this.missed >= 2) { events.end = 'missedGates'; break; }
-      }
+      const wasPenalized = this.penalty > 0;
+      const points = this.gateScore.cross(pass, gate); events.points += points;
+      if (pass) {
+        this.passed++;
+        if (wasPenalized) events.notice = this.penalty ? `GATE PASSED / PENALTY ${this.penalty}` : 'PENALTY CLEARED / BLAST CHARGING';
+      } else { this.missed++; events.notice = `GATE MISSED ${points} / PENALTY ${this.penalty}`; }
     }
+    const next = this.gates.find(gate => !gate.resolved);
+    for (const gate of this.gates) updateCanyonGateVisual(gate.object, gate === next && this.penalty > 0, this.elapsed);
     if (events.end) return events;
     for (const target of this.targets) {
       if (!target.used && sweptHit(this.previous, camera.position, target.object.position, target.object.position, target.radius + 2) !== null) {
-        target.used = true; target.object.visible = false; events.damage = true;
+        target.used = true; target.object.visible = false; events.damage.push('collision');
       }
     }
     let activeGuns = 0;
@@ -174,7 +185,7 @@ export class CanyonCourse {
     for (const bolt of this.shots) {
       if (bolt.used) continue;
       const previous = bolt.object.position.clone(); bolt.life -= dt; bolt.object.position.addScaledVector(bolt.velocity, dt);
-      if (sweptHit(this.previous, camera.position, previous, bolt.object.position, bolt.radius + 2) !== null) { events.damage = true; bolt.used = true; }
+      if (sweptHit(this.previous, camera.position, previous, bolt.object.position, bolt.radius + 2) !== null) { events.damage.push('gun'); bolt.used = true; }
       if (bolt.life <= 0 || bolt.object.position.z > camera.position.z + 70) bolt.used = true;
     }
     this.shots = this.shots.filter(bolt => {
@@ -191,8 +202,8 @@ export class CanyonCourse {
   get remaining(): number { return Math.max(0, this.length / (96 * this.profile.flightScale) * Math.log((48 + 96 * 0.985) / (48 + 96 * this.progress))); }
   get snapshot() {
     return { progress: this.progress, speed: this.speed, boosting: this.boosting, offset: this.offset.toArray(), passed: this.passed,
-      missStreak: this.missed, nextGate: this.nextGate, fired: this.fired,
-      gates: this.gates.map(g => ({ position: g.object.position.toArray(), offset: g.object.position.clone().sub(this.path.getPointAt(g.progress)).toArray(), radius: g.radius, progress: g.progress, resolved: g.resolved, passed: g.passed, exit: g.exit })),
+      missed: this.missed, penalty: this.penalty, nextGate: this.nextGate, fired: this.fired,
+      gates: this.gates.map(g => ({ position: g.object.position.toArray(), offset: g.object.position.clone().sub(this.path.getPointAt(g.progress)).toArray(), radius: g.radius, small: g.small, moving: g.motion > 0, points: g.exit ? 0 : canyonGatePoints(g), progress: g.progress, resolved: g.resolved, passed: g.passed, exit: g.exit })),
       targets: this.targets.filter(t => !t.used).map(t => ({ kind: t.kind, position: t.object.position.toArray(), radius: t.radius })),
       shots: this.shots.filter(b => !b.used).map(b => ({ position: b.object.position.toArray() })) };
   }

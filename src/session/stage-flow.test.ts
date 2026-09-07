@@ -23,9 +23,9 @@ describe('completion destinations and payouts', () => {
     else expect(afterGate(run)).toBe('bonusOffer');
   });
   it.each([1, 3, 5, 8, 1000])('Invaders wave %i settles pending misses before life awards and cannot dock', stage => {
-    const run = playing('invaders', stage), tracker = new ShotAccuracy(); run.pilot.score = 20000 - (250 + stage * 50) + 4;
-    tracker.begin(1, run.accuracy);
-    expect(completeEncounter(run, tracker)).toEqual({ route: 'recovery', missCost: 5, extraLives: 0 });
+    const run = playing('invaders', stage), tracker = new ShotAccuracy(); run.pilot.score = 20000 - (250 + stage * 50) + 99;
+    tracker.begin(1, run.accuracy, 11);
+    expect(completeEncounter(run, tracker)).toEqual({ route: 'recovery', missCost: 100, extraLives: 0 });
     expect(run.pilot.score).toBe(19999); expect(run.lives).toBe(3); expect(afterGate(run)).toBeNull();
     expect(run.accuracy).toEqual({ shots: 1, hits: 0, misses: 1 });
     const profile = freshProfile(); saveCheckpoint(profile, run);
@@ -55,34 +55,39 @@ describe('resume and course contracts', () => {
     const run = playing(); run.phase = phase;
     expect(resumeDestination(run)).toBe(phase === 'shop' || phase === 'bonusResult' ? 'shop' : phase === 'bonusOffer' ? 'bonusOffer' : 'briefing');
     run.phase = 'gameover'; run.lives = 0; expect(resumeDestination(run)).toBe('gameover');
-    run.mode = 'smuggler'; run.phase = 'cleared'; run.cleared = true; expect(resumeDestination(run)).toBe('smugglerResult');
+    run.mode = 'smuggler'; run.phase = 'cleared'; run.cleared = true; expect(resumeDestination(run)).toBe('intermission');
   });
   it('starts an available offer once and refuses entry from the wrong phase or mode', () => {
     const run = playing('journey', 3); expect(enterBonus(run)).toBeNull();
     run.phase = 'bonusOffer'; expect(enterBonus(run)).toBe('asteroids'); expect(run.phase).toBe('bonus'); expect(enterBonus(run)).toBeNull();
     run.phase = 'bonusOffer'; run.mode = 'invaders'; expect(enterBonus(run)).toBeNull();
   });
-  for (const kind of ['asteroids', 'canyon', 'sequence'] as const) for (const reason of ['complete', 'exit', 'crash', 'timeout', 'missedGates', 'gateMissed', 'wall'] as const) {
+  for (const kind of ['asteroids', 'canyon', 'sequence'] as const) for (const reason of ['complete', 'exit', 'crash', 'timeout', 'gateMissed', 'wall'] as const) {
     it(`settles ${kind} ${reason} with optional-course isolation and Smuggler stakes`, () => {
       // Only the outcome data is required. No course construction or flying.
-      const state: CourseOutcome = { kind, finished: true, reason, points: 200, health: 3, difficulty: 1 };
+      const state: CourseOutcome = { kind, finished: true, reason, points: 200, haul: 0, health: 3, difficulty: 1 };
       const run = playing('journey', { asteroids: 3, canyon: 7, sequence: 11 }[kind]); run.phase = 'bonusOffer'; enterBonus(run);
       const main = structuredClone(run.pilot), lives = run.lives;
       const result = settleCourse(run, state, 0.5)!; expect(result.kind).toBe('bonus');
       expect(run.pilot.hull).toBe(main.hull); expect(run.pilot.shield).toBe(main.shield); expect(run.lives).toBe(lives);
       expect(run.tiers).toEqual({ pulse: 1, spread: 1, lance: 1 }); expect(run.pilot.inventory).toEqual(main.inventory);
-      expect(run.pilot.score - main.score).toBe(kind === 'sequence' ? 200 : 750);
+      expect(run.pilot.score - main.score).toBe(kind === 'asteroids' ? 750 : 200);
       expect(settleCourse(run, state, 0.5)).toBeNull();
       const smuggler = playing('smuggler');
       const outcome = settleCourse(smuggler, state, 0.5)!; expect(outcome.kind).toBe('smuggler');
-      if (reason === 'complete') { expect(smuggler.phase).toBe('cleared'); expect(smuggler.pilot.score).toBe(6300); expect(smuggler.lives).toBe(4); }
-      else { expect(smuggler.pilot.score).toBe(0); expect(smuggler.lives).toBe(2); }
+      if (reason === 'complete') { expect(smuggler.phase).toBe('cleared'); expect(smuggler.pilot.score).toBe(kind === 'canyon' ? 1500 : 6300); expect(smuggler.lives).toBe(kind === 'canyon' ? 3 : 4); }
+      else { expect(smuggler.pilot.score).toBe(kind === 'canyon' ? 200 : 5000); expect(smuggler.lives).toBe(kind === 'canyon' ? 2 : 3); }
       expect(settleCourse(smuggler, state, 0.5)).toBeNull();
     });
   }
   it('does not pay for unfinished courses or revive consumed offers', () => {
-    const run = playing(), state: CourseOutcome = { kind: 'asteroids', finished: false, reason: null, points: 0, health: 3, difficulty: 1 };
+    const run = playing(), state: CourseOutcome = { kind: 'asteroids', finished: false, reason: null, points: 0, haul: 0, health: 3, difficulty: 1 };
     expect(settleCourse(run, state, 1)).toBeNull();
     state.finished = true; expect(settleCourse(run, state, 1)).toBeNull();
+  });
+  it.each(['complete', 'exit'] as const)('optional canyon %s settles haul only on delivery, without touching the parked ship', reason => {
+    const run = playing('journey', 7); run.phase = 'bonusOffer'; enterBonus(run);
+    const result = settleCourse(run, { kind: 'canyon', finished: true, reason, points: 200, haul: 3, health: 2, difficulty: 1 }, 0.5)!;
+    expect(result.score).toBe(reason === 'complete' ? 425 : 200); expect(run.lives).toBe(3); expect(run.pilot.hull).toBe(100);
   });
 });

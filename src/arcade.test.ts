@@ -43,13 +43,14 @@ describe('arcade checkpoints and rewards', () => {
     expect(r.lives).toBe(3);
     expect(r.tiers).toEqual({ pulse: 1, spread: 1, lance: 1 });
   });
-  it('restores all stage equipment and rolls back unbanked score and cargo', () => {
+  it('restores stage equipment and cargo while retaining the score', () => {
     const r = newRun('journey', 42);
     r.phase = 'playing';
     const start = resources(r);
     pickup(r, { type: 'weaponCore', amount: 1 });
     pickup(r, { type: 'rareMineral', amount: 3 });
     rewardKill(r);
+    start.pilot.score = r.pilot.score;
     r.pilot.hull = 10;
     loseLife(r);
     expect(resources(r)).toEqual(start);
@@ -71,7 +72,7 @@ describe('arcade checkpoints and rewards', () => {
     r.pilot.score = 120; recordRun(p, r);
     expect(p.records.journey).toBe(500);
     expect(p.records.journeyContinued).toBe(120);
-    loseLife(r); expect(r.pilot.score).toBe(0);
+    loseLife(r); expect(r.pilot.score).toBe(120);
   });
   it('banks a stage once and preserves purchases into the next checkpoint', () => {
     const r = newRun('journey', 77);

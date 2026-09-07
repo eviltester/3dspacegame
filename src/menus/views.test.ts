@@ -25,6 +25,13 @@ describe('menu views', () => {
     settleStage(run);
     expect(MenuViews.briefing(run, definition)[3]).toContain('beam is released');
   });
+  it('shows Invaders miss bands, repair odds and damage without changing other briefings', () => {
+    const run = newRun('invaders', 1), view = MenuViews.briefing(run, stageDefinition('invaders', 1))[3];
+    expect(view).toContain('11+ aliens -100 / 6-10 aliens -75 / 0-5 aliens -50');
+    expect(view).toContain('counted when fired'); expect(view).toContain('three separately scored bolts');
+    expect(view).toContain('1-in-15 chance'); expect(view).toContain('10 shield or 20 unshielded hull');
+    expect(MenuViews.briefing(newRun('journey', 1), stageDefinition('journey', 1))[3]).not.toContain('MISS COST');
+  });
   it('keeps Continue active throughout the zero-life countdown', () => {
     const run = newRun('journey', 1);
     run.lives = 0;

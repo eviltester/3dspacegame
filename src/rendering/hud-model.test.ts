@@ -10,14 +10,34 @@ import { WEAPON_HELP } from '../weapons';
 function frame(mode: GameMode = 'journey'): HudFrame & { run: NonNullable<HudFrame['run']> } {
   const run = newRun(mode, 1); run.phase = 'playing';
   return { run, menu: '', profile: freshProfile(), selectedMode: mode, bonus: null, definition: { kind: mode === 'invaders' ? 'armada' : 'patrol', title: 'PATROL' },
-    actors: [], throttle: 65, recovery: 8, arrivalTime: 0, rescued: false, objectiveShip: null, director: { flight: 1, totalFlights: 2 },
+    actors: [], throttle: 65, recovery: 8, intermission: 0, arrivalTime: 0, rescued: false, objectiveShip: null, director: { flight: 1, totalFlights: 2 },
     position: new Vector3(), orientation: new Quaternion(), messages: [], feedbackTime: 0, hitTime: 0, popupTime: 0,
     gate: null, base: null, objectivePod: null, threat: null, shotDelay: 0, protection: 0 };
 }
 function bonus(kind: 'asteroids' | 'canyon' | 'sequence'): NonNullable<HudFrame['bonus']> {
-  return { state: { kind, difficulty: 4, points: 10, health: 2, family: 'spread', charge: 100, remaining: 23.4, targetCount: 22, nextMarker: 4, shotsFired: 7 } };
+  return { state: { kind, difficulty: 4, points: 10, health: 2, shield: kind === 'canyon' ? 100 : 0, haul: 0, family: 'spread', charge: 100, remaining: 23.4, targetCount: 22, nextMarker: 4, shotsFired: 7 } };
 }
 describe('resource display is a projection, not independently updated state', () => {
+  it('shows unconverted canyon cargo, numeric shields, and the paid conversion on the summary', () => {
+    const f = frame('smuggler'); f.bonus = bonus('canyon'); f.bonus.state.haul = 3; f.bonus.state.shield = 40;
+    const cargo = [{ position: new Vector3(0, 0, -40), color: '#ffff70', glyph: 'cargo' as const }]; f.bonus.cargo = { contacts: cargo };
+    const view = buildHud(f); expect(view.text.shieldReadout).toBe('40 / 100'); expect(view.text.cargoReadout).toBe('HAUL 3 / +225 AT EXIT');
+    expect(view.text.scoreReadout).toBe('000010'); expect(view.radar).toEqual(cargo);
+    f.bonus = null; f.run.stageHaul = 3; f.run.pilot.score = 1535; f.intermission = 3;
+    const paid = buildHud(f); expect(paid.text.courseHaul).toBe('HAUL 3 x 75 = +225'); expect(paid.hidden['#courseHaul']).toBe(false);
+    expect(paid.text.courseScore).toBe('SCORE 1535');
+  });
+  it('shows a compact score/lives summary and countdown, hidden while paused', () => {
+    const f = frame('smuggler'); f.run.pilot.score = 1500; f.run.lives = 2; f.intermission = 2.1;
+    const view = buildHud(f); expect(view.hidden['#courseSummary']).toBe(false);
+    expect(view.text).toMatchObject({ courseScore: 'SCORE 1500', courseLives: 'LIVES 2', courseNext: 'LEVEL 2 IN 3' });
+    f.menu = 'pause'; expect(buildHud(f).hidden['#courseSummary']).toBe(true);
+  });
+  it('projects skiff repair pickups onto the course radar', () => {
+    const f = frame('smuggler'); f.bonus = bonus('canyon');
+    const contacts = [{ position: new Vector3(10, 0, -50), color: '#70cfff', glyph: 'cargo' as const }];
+    f.bonus.repairs = { contacts }; expect(buildHud(f).radar).toEqual(contacts);
+  });
   for (const mode of ['journey', 'endless', 'invaders'] as const) for (const family of ['pulse', 'spread', 'lance'] as WeaponFamily[]) {
     it(`${mode} ${family} pickup and purchase always produce the new weapon readout`, () => {
       const f = frame(mode); f.run.family = family;
@@ -77,17 +97,29 @@ describe('mission and course readouts', () => {
   it.each(['asteroids', 'canyon', 'sequence'] as const)('%s projects loan-craft state and safe-exit visibility', kind => {
     const f = frame(); f.bonus = bonus(kind);
     if (kind === 'asteroids') f.bonus.asteroidRun = { speed: 150, exitApproach: true };
-    if (kind === 'canyon') f.bonus.canyon = { speed: 250, boosting: true, nextGate: 18, missed: 1 };
+    if (kind === 'canyon') f.bonus.canyon = { speed: 250, boosting: true, nextGate: 18, penalty: 200, nextGatePoints: 0 };
     const model = buildHud(f); expect(model.text.weaponReadout).toBe('SPREAD 1'); expect(model.text.hullReadout).toBe('2 / 3'); expect(model.text.missionTitle).toBe('24 SECONDS'); expect(model.hidden['#bonusExitButton']).toBe(false);
-    expect(model.text.missionProgress).toBe(kind === 'asteroids' ? 'FLY THROUGH THE EXIT GATE' : kind === 'canyon' ? 'FLY THROUGH EXIT / MISSED 1/2' : 'NEXT MARKER 4 / 22');
+    expect(model.text.missionProgress).toBe(kind === 'asteroids' ? 'FLY THROUGH THE EXIT GATE' : kind === 'canyon' ? 'FLY THROUGH EXIT' : 'NEXT MARKER 4 / 22');
     if (kind === 'sequence') { expect(model.text.levelClock).toBe('SHOTS 7'); expect(model.text.timeBonusReadout).toBe('BONUS SCORE 10'); }
-    f.run.mode = 'smuggler'; expect(buildHud(f).hidden['#bonusExitButton']).toBe(true); expect(buildHud(f).text.creditReadout).toBe('HAUL +250'); expect(buildHud(f).text.reputation).toBe('BANKED 0');
+    f.run.mode = 'smuggler'; expect(buildHud(f).hidden['#bonusExitButton']).toBe(true); expect(buildHud(f).text.creditReadout).toBe(kind === 'canyon' ? 'FLIGHT +10' : 'FLIGHT +250'); expect(buildHud(f).text.reputation).toBe('LEG START 0');
   });
   it('does not replace banked records with preview score or mutate input state', () => {
     const f = frame(); f.run.pilot.score = 900; f.profile.records.invaders = 500; f.selectedMode = 'invaders';
     for (const menu of ['title', 'scores']) { f.menu = menu; expect(buildHud(f).text.arcadeBest).toBe('000500'); expect(buildHud(f).text.arcadeScore).toBe('000000'); }
     expect(buildHud({ ...f, menu: '', run: null }).text).toEqual({});
     const before = JSON.stringify(f); buildHud(f); expect(JSON.stringify(f)).toBe(before);
+  });
+  it('shows canyon penalties, face-value score, next-gate reward and paused blast charging', () => {
+    const f = frame(); f.run.mode = 'smuggler'; f.run.pilot.score = 1000;
+    f.bonus = bonus('canyon'); f.bonus.state.points = -200; f.bonus.state.charge = 40;
+    f.bonus.canyon = { speed: 100, boosting: false, nextGate: 2, penalty: 400, nextGatePoints: 200 };
+    const model = buildHud(f);
+    expect(model.text.scoreReadout).toBe('000800'); expect(model.text.arcadeScore).toBe('000800');
+    expect(model.text.creditReadout).toBe('FLIGHT -200'); expect(model.text.levelClock).toBe('PENALTY 400');
+    expect(model.text.timeBonusReadout).toBe('COURSE SCORE -200'); expect(model.hidden['#levelTimer']).toBe(false);
+    expect(model.text.missionProgress).toBe('GATE 3/18 / +200'); expect(model.text.chargeReadout).toBe('BLAST 40% / PAUSED');
+    f.bonus.canyon.penalty = 0; expect(buildHud(f).text.levelClock).toBe('PENALTY 0'); expect(buildHud(f).text.chargeReadout).toBe('BLAST 40%');
+    f.bonus = null; expect(buildHud(f).text.creditReadout).toBe('FLIGHT +0');
   });
   it('projects radar glyphs, colours, direction and hidden contacts', () => {
     const f = frame(); const pirate = actorFixture(); pirate.object.position.set(-100, -50, -100);

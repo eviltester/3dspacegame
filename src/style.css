@@ -227,6 +227,12 @@ button { font: inherit; }
 .run-loadout { font-size: 12px; color: #ffff70; margin-top: 24px; }
 .mission-copy { font-size: 15px; line-height: 1.7; }
 .result-score { font-size: 26px; color: #ffff70; }
+.course-summary { position: absolute; inset: 0; z-index: 1; display: grid; align-content: center; justify-items: center; gap: 16px; padding: 24px; background: #000; color: #ffff70; text-align: center; pointer-events: none; }
+.course-summary h2 { margin: 0 0 16px; font-size: 22px; color: #8affb0; }
+.course-summary p { margin: 0; font-size: 22px; max-width: 100%; overflow-wrap: anywhere; }
+.course-summary #courseNext { font-size: 14px; color: #ededed; }
+.course-summary #courseHaul { font-size: 16px; color: #8affb0; }
+.course-intermission .hud { visibility: hidden; }
 .shop-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid #35423b; }
 .shop-row strong { font-size: 13px; }
 .shop-row span { display: block; color: #acb7b0; font-size: 11px; margin-top: 6px; }

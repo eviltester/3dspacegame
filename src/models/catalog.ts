@@ -9,6 +9,7 @@ import type { CargoType } from '../logic';
 import { ASTEROID_COLORS, edgesFromGeometry, createPulseRing } from './primitives';
 import { createEnemyModel, createInvaderModel, createPoliceModel, createTraderHaulerModel, createTraderUfoModel, createCanyonTurret } from './ships';
 import { createCargoModel, createBaseModel, createPlanetModel, createBlackMarketModel, createGateModel, createCanyonGate } from './landmarks';
+import { createSkiffRepairModel } from './skiff-repairs';
 
 export interface CatalogItem { title: string; description: string; create: () => THREE.Object3D; scale: number; cameraZ: number }
 
@@ -35,6 +36,8 @@ export function createCatalog(): CatalogItem[] {
   ];
   for (const [kind, description] of cargo) items.push({ title: kind === 'shieldCell' ? 'REPAIR CELL' : kind.replace(/([A-Z])/g, ' $1').toUpperCase(), description, create: () => createCargoModel(kind), scale: 3.4, cameraZ: 62 });
   items.push(
+    { title: 'SKIFF SHIELD', description: 'Blue pickup. Repairs one skiff hull point and restores 20 canyon shield. Shooting rocks or canyon crates has a 1 in 15 chance to release one.', create: () => createSkiffRepairModel('shield'), scale: 2.6, cameraZ: 62 },
+    { title: 'SKIFF REPAIR', description: 'Pink pickup. Restores all skiff hull and canyon shields. Shooting rocks or canyon guns has a 1 in 30 chance to release one.', create: () => createSkiffRepairModel('repair'), scale: 2.6, cameraZ: 62 },
     { title: 'SUPPLY STATION', description: 'Sell legal cargo here. Mission completion opens the upgrade dock.', create: createBaseModel, scale: 0.45, cameraZ: 86 },
     { title: 'OUTPOST PLANET', description: 'Solid landmark. Canyon bonus sorties use a loan skiff near the surface.', create: () => createPlanetModel(0x6fffbc), scale: 0.44, cameraZ: 96 },
     { title: 'BLACK MARKET', description: 'The magenta exchange buys contraband. Its outer ring is not cargo.', create: createBlackMarketModel, scale: 0.65, cameraZ: 92 },
@@ -42,9 +45,9 @@ export function createCatalog(): CatalogItem[] {
     { title: 'MINE', description: 'A red wireframe star. It flashes before arming. Destroy it from a distance.', create: () => edgesFromGeometry(new THREE.OctahedronGeometry(4), 0xff4055), scale: 3, cameraZ: 62 },
     { title: 'ASTEROID', description: 'Coloured rocks are hazards, not cargo. Large rocks split into medium rocks, then drifting fragments. Follow the gaps and fly through EXIT. Blasts vaporize rocks.', create: () => edgesFromGeometry(new THREE.IcosahedronGeometry(6), ASTEROID_COLORS[0]), scale: 2, cameraZ: 62 },
     { title: 'BONUS MARKER', description: 'Find the shuffled numbers and shoot in order. Yellow is next. Remaining markers move faster after successful hits.', create: () => createPulseRing(0xffff60, 7, 0, 1, 8), scale: 2, cameraZ: 62 },
-    { title: 'CANYON GATE', description: 'Fly through the green opening. Gates shrink and move. Two consecutive misses end the bonus.', create: createCanyonGate, scale: 1.5, cameraZ: 62 },
-    { title: 'CANYON GUN', description: 'Flashes yellow before firing red bolts. Shoot the gun or intercept its fire.', create: createCanyonTurret, scale: 2, cameraZ: 62 },
-    { title: 'CANYON OBSTACLE', description: 'Amber rock spires obstruct the route. Dodge or shoot them. Find the exit opening in the final wall.', create: () => edgesFromGeometry(new THREE.OctahedronGeometry(8), 0xffbf48), scale: 2, cameraZ: 62 }
+    { title: 'CANYON GATE', description: 'Large +50, small +100; moving gates pay double. Misses build a 200-point penalty; each pass reduces it by 200. The next gate pulses green while penalized.', create: createCanyonGate, scale: 1.5, cameraZ: 62 },
+    { title: 'CANYON GUN', description: 'Flashes yellow before firing. Destroy it for 200 points or intercept its shots for 10. Each hit costs 20 shield, or one hull point when shields are empty.', create: createCanyonTurret, scale: 2, cameraZ: 62 },
+    { title: 'CANYON CRATE', description: 'Amber obstacles. Shooting one has a 1 in 5 chance to release yellow haul. Collect the pickup and deliver it at EXIT for 75 points. The crate itself gives no score.', create: () => edgesFromGeometry(new THREE.OctahedronGeometry(8), 0xffbf48), scale: 2, cameraZ: 62 }
   );
   return items;
 }

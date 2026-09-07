@@ -3,6 +3,10 @@ import type { RunState } from '../arcade';
 import type { StageKind } from '../encounters';
 import type { CargoDrop, CargoType } from '../logic';
 
+// One equally likely repair slot out of fifteen; the other rewards stay balanced.
+const INVADER_SALVAGE: readonly CargoType[] = ['shieldCell',
+  ...Array<CargoType>(7).fill('credits'), ...Array<CargoType>(7).fill('weaponCore')];
+
 export interface ObjectiveState {
   kind: StageKind;
   flightsFinished: boolean;
@@ -24,7 +28,7 @@ export function pirateSalvage(run: RunState, pick: (types: readonly CargoType[])
     run.earlyCore = true;
     return { drop: { type: 'weaponCore', amount: 1 }, essential: true };
   }
-  const type = run.mode === 'invaders' ? run.kills % 4 === 0 ? 'shieldCell' : pick(['credits', 'shieldCell', 'weaponCore'])
+  const type = run.mode === 'invaders' ? pick(INVADER_SALVAGE)
     : pick(['credits', 'credits', 'legalCargo', 'rareMineral', 'shieldCell', 'contraband', 'weaponCore']);
   return { drop: { type, amount: 1 }, essential: false };
 }
