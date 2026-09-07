@@ -2,9 +2,13 @@
  * Shared bindings and their human-readable labels for input, menus and briefings.
  * KeyboardEvent.code values describe physical keys; labels are presentation only.
  */
-export type ControlScheme = 'mouse' | 'wasd' | 'arrows';
-export const CONTROL_SCHEMES: readonly ControlScheme[] = ['mouse', 'wasd', 'arrows'];
+export type ControlScheme = 'mouse' | 'wasd' | 'arrows' | 'touch';
+export const CONTROL_SCHEMES: readonly ControlScheme[] = ['mouse', 'wasd', 'arrows', 'touch'];
 export const KEYBOARD_LOOK_RATE = 520;
+
+export function tiltSensitivity(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0.5, Math.min(2, value)) : 1;
+}
 
 interface ControlLayout {
   name: string;
@@ -29,6 +33,11 @@ const keyboard = {
 };
 
 export const CONTROL_LAYOUTS: Record<ControlScheme, ControlLayout> = {
+  touch: {
+    name: 'TOUCH / TILT', steering: 'TILT / DRAG', horizontal: 'Tilt / drag', fire: 'LEFT SIDE', blast: 'TAP RIGHT SIDE',
+    up: [], down: [], left: [], right: [], primary: ['Space'], special: [],
+    accelerate: [], brake: [], rollLeft: [], rollRight: []
+  },
   mouse: {
     name: 'MOUSE', steering: 'MOUSE', horizontal: 'Mouse', fire: 'LEFT CLICK', blast: 'RIGHT CLICK',
     up: [], down: [], left: [], right: [], primary: ['Space'], special: [],
@@ -52,4 +61,11 @@ export function isControlScheme(value: unknown): value is ControlScheme {
 export function flightControls(scheme: ControlScheme): string {
   const layout = CONTROL_LAYOUTS[scheme];
   return `${layout.steering} steers / aims. Hold ${layout.fire} to fire. ${layout.blast} uses your charged blast.`;
+}
+
+export function boostControls(scheme: ControlScheme): string {
+  return scheme === 'touch' ? 'Use the on-screen Boost button.' : 'Shift or wheel forward boosts.';
+}
+export function pauseControls(scheme: ControlScheme): string {
+  return scheme === 'touch' ? 'Use the on-screen Pause button.' : 'Esc pauses.';
 }

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import type { WeaponCommand } from './weapons';
 import { CONTROL_LAYOUTS, KEYBOARD_LOOK_RATE } from './input-layouts';
 import type { ControlScheme } from './input-layouts';
+import { MobileInput } from './mobile/input';
 
 export const MIN_THROTTLE = -90;
 export const MAX_THROTTLE = 180;
@@ -29,8 +30,10 @@ export function throttleReadout(throttle: number): string {
 }
 
 export class FlightInput {
+  readonly mobile: MobileInput;
   active = false;
   firing = false;
+  private touchFiring = false;
   // Remember a quick tap even if mouseup happens before the next simulation tick.
   private firePressed = false;
   throttle = 65;
@@ -43,10 +46,11 @@ export class FlightInput {
   private keys = new Set<string>();
   private middlePressed = false;
   private middleHold: ReturnType<typeof setTimeout> | null = null;
-  constructor(private canvas: HTMLCanvasElement, private pause: () => void, private special: () => void, private weapon: (command: WeaponCommand) => void = () => {}) {
+  constructor(private canvas: HTMLCanvasElement, private pause: () => void, private special: () => void, private weapon: (command: WeaponCommand) => void = () => {}, motionChanged: () => void = () => {}) {
+    this.mobile = new MobileInput(canvas, () => this.active && this.scheme === 'touch', motionChanged);
     canvas.addEventListener('contextmenu', event => event.preventDefault());
     canvas.addEventListener('mousedown', event => {
-      if (!this.active) return;
+      if (!this.active || this.scheme === 'touch') return;
       event.preventDefault();
       if (event.button === 0) { this.firing = true; this.firePressed = true; }
       if (event.button === 1 && !this.middlePressed) {
@@ -62,6 +66,7 @@ export class FlightInput {
     });
     canvas.addEventListener('auxclick', event => { if (this.active && event.button === 1) event.preventDefault(); });
     window.addEventListener('mouseup', event => {
+      if (this.scheme === 'touch') return;
       if (event.button === 0) this.firing = false;
       if (event.button === 1) {
         const cycle = this.middlePressed && this.active;
@@ -76,7 +81,7 @@ export class FlightInput {
       }
     });
     canvas.addEventListener('wheel', event => {
-      if (!this.active) return;
+      if (!this.active || this.scheme === 'touch') return;
       event.preventDefault();
       if (this.autoFlight) { if (event.deltaY < 0) this.wheelBoost = 1.5; }
       else this.throttle = wheelThrottle(this.throttle, event.deltaY);
@@ -105,7 +110,13 @@ export class FlightInput {
       if (!document.pointerLockElement && this.active && this.scheme === 'mouse' && !this.fallback) this.pause();
     });
   }
-  setScheme(scheme: ControlScheme): void { this.clear(); this.scheme = scheme; }
+  setScheme(scheme: ControlScheme): void {
+    this.clear(); this.scheme = scheme;
+    this.canvas.classList?.toggle('touch-flight', scheme === 'touch');
+    if (scheme !== 'touch') this.mobile.motion.stop();
+  }
+  boost(): void { if (this.active) this.wheelBoost = 1.5; }
+  adjustThrottle(direction: number): void { if (this.active && !this.autoFlight) this.throttle = wheelThrottle(this.throttle, -direction); }
   async engage(): Promise<void> {
     this.clear();
     this.active = true;
@@ -126,20 +137,27 @@ export class FlightInput {
     if (this.middleHold !== null) clearTimeout(this.middleHold);
     this.middleHold = null; this.middlePressed = false;
   }
-  clear(): void { this.firing = false; this.firePressed = false; this.dx = 0; this.dy = 0; this.wheelBoost = 0; this.keys.clear(); this.clearMiddle(); }
+  clear(): void { this.firing = false; this.touchFiring = false; this.firePressed = false; this.dx = 0; this.dy = 0; this.wheelBoost = 0; this.keys.clear(); this.clearMiddle(); this.mobile.clear(); }
   consumeFire(): boolean {
-    const requested = this.active && (this.firing || this.firePressed || this.held(CONTROL_LAYOUTS[this.scheme].primary));
+    const requested = this.active && (this.firing || this.touchFiring || this.firePressed || this.held(CONTROL_LAYOUTS[this.scheme].primary));
     this.firePressed = false;
     return requested;
   }
   private held(codes: readonly string[]): boolean { return codes.some(code => this.keys.has(code)); }
   consume(dt: number): FlightCommand {
+    if (this.active && this.scheme === 'touch') {
+      const touch = this.mobile.read(dt);
+      this.dx += touch.x; this.dy += touch.y;
+      this.firePressed ||= touch.fire; this.touchFiring = touch.held;
+      if (touch.blast) this.special();
+      if (touch.cycle) this.weapon('next');
+    }
     // Mouse input is already a displacement; held keys are rates multiplied by dt.
     // Only transient deltas are consumed. The selected throttle is deliberately kept.
     const layout = CONTROL_LAYOUTS[this.scheme];
     if (!this.autoFlight && this.held(layout.accelerate)) this.throttle = Math.min(MAX_THROTTLE, this.throttle + dt * 80);
     if (!this.autoFlight && this.held(layout.brake)) this.throttle = Math.max(MIN_THROTTLE, this.throttle - dt * 100);
-    const boost = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || (this.autoFlight && this.wheelBoost > 0);
+    const boost = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.wheelBoost > 0;
     this.wheelBoost = Math.max(0, this.wheelBoost - dt);
     const value = { x: this.dx + (Number(this.held(layout.right)) - Number(this.held(layout.left))) * KEYBOARD_LOOK_RATE * dt,
       y: this.dy + (Number(this.held(layout.down)) - Number(this.held(layout.up))) * KEYBOARD_LOOK_RATE * dt,

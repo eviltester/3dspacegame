@@ -38,9 +38,17 @@ export function coursePreview(kind: BonusKind, width: number, height: number): s
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setSize(width, height);
   const course = new BonusController(kind, 42, 8), scene = new THREE.Scene(); scene.add(course.root);
   const camera = new THREE.PerspectiveCamera(72, width / height, 0.1, 4000);
+  const flightCamera = camera.clone();
+  const pillar = course.canyon?.barriers.items.find(item => item.kind === 'risingPillar');
+  if (pillar) pillar.phase = 0.35;
   const frames: string[] = [];
   for (const dt of [0, 0.12]) {
-    course.step(dt, { x: 0, y: 0 }, camera);
+    course.step(dt, { x: 0, y: 0 }, flightCamera); camera.copy(flightCamera);
+    if (pillar) {
+      // Inspect real scenery in its canyon, near enough to see the retracting column.
+      camera.position.copy(pillar.base).add(new THREE.Vector3(-pillar.base.x * 0.1, 42, 150));
+      camera.lookAt(pillar.base.clone().add(new THREE.Vector3(0, 26, -30)));
+    }
     renderer.render(scene, camera); frames.push(renderer.domElement.toDataURL());
   }
   course.dispose(); renderer.dispose(); renderer.forceContextLoss(); return frames;

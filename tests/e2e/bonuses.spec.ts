@@ -48,6 +48,11 @@ for (const kind of ['canyon', 'sequence'] as const) {
     expect(lit).toBeGreaterThan(300);
     if (kind === 'canyon') {
       expect(frames[1]).not.toBe(frames[0]);
+      let pillarPixels = 0;
+      for (let i = 0; i < png.data.length; i += 4) {
+        if (png.data[i] > 80 && png.data[i] > png.data[i + 1] * 1.5 && png.data[i + 2] > png.data[i + 1] * 1.3) pillarPixels++;
+      }
+      expect(pillarPixels, 'visible pink retracting column in the canyon').toBeGreaterThan(30);
       const gates = await page.evaluate(async path => {
         const { canyonGatePreview } = await import(path) as typeof import('./fixtures/rendering');
         return canyonGatePreview();
@@ -56,6 +61,12 @@ for (const kind of ['canyon', 'sequence'] as const) {
       expect(greenPixels(gates[2]).brightness).toBeGreaterThan(greenPixels(gates[1]).brightness * 1.2);
       expect(gates[3]).toBe(gates[0]);
       await game.info.attach('canyon-gate-warning', { body: Buffer.from(gates[2].split(',')[1], 'base64'), contentType: 'image/png' });
+      const narrow = await page.evaluate(async path => {
+        const { coursePreview } = await import(path) as typeof import('./fixtures/rendering');
+        return coursePreview('canyon', 390, 844);
+      }, '/tests/e2e/fixtures/rendering.ts');
+      expect(narrow[0]).not.toBe(narrow[1]);
+      await game.info.attach('canyon-narrow', { body: Buffer.from(narrow[0].split(',')[1], 'base64'), contentType: 'image/png' });
     }
     await game.info.attach(kind, { body: buffer, contentType: 'image/png' });
   });

@@ -29,7 +29,7 @@ The browser calls `ArcadeGame.frame` through `requestAnimationFrame`. That callb
 
 For each simulation step:
 
-1. `FlightInput` provides accumulated mouse movement, held keys and one-shot actions. It clears consumed events so a click is not repeated accidentally.
+1. `FlightInput` provides accumulated mouse/touch movement, calibrated tilt, held keys and one-shot actions. It clears consumed events so a click is not repeated accidentally.
 2. Exactly one movement system takes control: `moveShip` handles free flight and the armada lane; a bonus/course controller owns its own flight path. The bonus/course branch returns early, leaving the normal combat world inactive.
 3. In normal combat, the encounter director releases scheduled fighters when there is space. Enemy AI moves actors, chooses faction-appropriate targets and advances attack warnings.
 4. `assistedAim` applies a narrow correction toward eligible hostiles before the projectile controller resolves combat. World interactions collect cargo, trade, scan for contraband and keep the player outside solid landmarks.
@@ -38,6 +38,10 @@ For each simulation step:
 `buildHud` projects the result into text, visibility, styles and radar contacts, normally at 20 updates per second. It takes its animation time explicitly and has no DOM or clock dependency. `HudController` only applies that model to the screen. Visual sparks and sounds respond to gameplay events; they are not damageable world actors.
 
 ## Coordinates And Collisions
+
+Mobile input is kept out of the game coordinator. `mobile/gestures.ts` recognises taps, double taps, holds and drags using a supplied clock; it has no DOM or timers. `mobile/tilt.ts` maps the current orientation relative to a calibrated quaternion into screen-relative steering, then applies a dead zone and timestep-based smoothing. `mobile/motion.ts` owns permission, sensor freshness and listener lifecycle; late permission replies cannot re-enable a disabled sensor. `mobile/input.ts` captures touch pointers on the flight canvas and combines gesture and tilt commands. `mobile/controls.ts` connects settings/buttons to these adapters. All modes consume the same resulting `FlightCommand`.
+
+The first tap waits 260 milliseconds so a second tap can switch weapons without spending a blast. Left holds become continuous fire after that window. Touch IDs keep simultaneous left-fire and right-blast gestures separate. Releasing input clears pending gestures as well as held fire, preventing a delayed shot after pause. Native browser pointer capture and responsive layout have a small browser smoke test; gesture, orientation and permission decisions have source-adjacent unit tests.
 
 The game uses Three.js vectors: +X is right, +Y is up, and the ship faces local -Z. Distances and velocities use world units; simulation durations are seconds. A quaternion stores orientation without a fixed pitch limit. Local-axis rotation lets the ship loop continuously without hitting an artificial up/down stop.
 
@@ -80,6 +84,12 @@ In Smuggler Run the same courses are the main missions. Every finished flight re
 `CanyonHaul` owns yellow drops, swept collection and radar contacts; it never awards points. A separate random stream gives shot crates their 1/5 chance without changing course layouts or repair rolls. The collected count stays in `BonusRunState.haul` until EXIT settlement. `RunState.stageHaul` saves only the paid count for the summary; older saves default it to null. Failed/restarted flights retain earned score, not undelivered cargo. The existing phase/cleared guards prevent duplicate conversion after a save or repeated completion event.
 
 `canyon-combat.ts` contains the pure shield, impact and reward rules. `CanyonCourse` reports individual gun impacts separately from walls/solid obstacles. `BonusController` applies a short grace interval only to sustained physical contact; each gun bolt consumes 20 shield, with hull loss only when the shield was already empty. Repair pickup events also refill canyon shields. These skiff values are separate from the main ship's shields and hull.
+
+`CanyonBarriers` places one solid obstacle per selected gap between gates. Fixed and retracting full/half columns share box bounds with their sparse rendered geometry. `sweepCanyonBarrier` clips motion against moving box planes, so boost and rising columns cannot skip collisions. Deflection changes only lateral/vertical offset: automatic forward distance is never clamped, and each barrier reports at most one impact. Player rays and enemy bolts use the same bounds for cover.
+
+`AsteroidTraffic` replaces selected rock slots at higher difficulties, with its own seeded steering randomness. Its ships always have positive world-Z velocity and face that velocity, while the player's route advances toward negative Z. Passed ships retire rather than turning around. It supplies collisions, arrival notices, radar contacts and shared hull-panel explosions. `BonusController` includes pirates in weapon/blast targets and excludes police; the controller never grants asteroid fragments or repair drops for a ship kill.
+
+`courseRadarContacts` projects the course's live objects into drawing data. It does not register a second collection of entities: visibility, destruction, collection, moving gates and pillar retraction are read on each HUD update. `BonusController.radarContacts` is the only course contact source passed to the HUD. `radar.ts` owns glyph drawing and camera-relative projection; its course preset magnifies narrow flight lanes independently of forward range and clips passed contacts. The destination cross draws last so hazards cannot obscure it. The HUD adapter uses the skiff camera's position and quaternion, not the parked main ship's transform.
 
 `skiffRepairDrop` uses thirty equal probability slots to express the 1/15 and 1/30 drop rates. `SkiffRepairDrops` owns pickup models, swept collection, expiry and radar contacts. Its random stream is separate from course/fragment generation. The course calls it only for shot-destroyed rocks, salvage and guns. Canyon fire counts misses per ray-tested projectile, not per trigger pull; a piercing hit or intercepted bolt prevents that projectile's 50-point deduction.
 

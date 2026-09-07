@@ -6,6 +6,7 @@ import { actorFixture } from '../testing/actors';
 import { buildHud } from './hud-model';
 import type { HudFrame } from './hud-model';
 import { WEAPON_HELP } from '../weapons';
+import { COURSE_RADAR_VIEW, SPACE_RADAR_VIEW } from '../radar';
 
 function frame(mode: GameMode = 'journey'): HudFrame & { run: NonNullable<HudFrame['run']> } {
   const run = newRun(mode, 1); run.phase = 'playing';
@@ -18,9 +19,22 @@ function bonus(kind: 'asteroids' | 'canyon' | 'sequence'): NonNullable<HudFrame[
   return { state: { kind, difficulty: 4, points: 10, health: 2, shield: kind === 'canyon' ? 100 : 0, haul: 0, family: 'spread', charge: 100, remaining: 23.4, targetCount: 22, nextMarker: 4, shotsFired: 7 } };
 }
 describe('resource display is a projection, not independently updated state', () => {
+  it('shows touch tools only in flight and throttle only during free flight', () => {
+    const f = frame(); expect(buildHud(f).hidden['#touchTools']).toBe(true);
+    f.profile.settings.controlScheme = 'touch';
+    expect(buildHud(f).hidden).toMatchObject({ '#touchTools': false, '#touchThrottle': false, '#touchBoost': false });
+    f.menu = 'pause'; expect(buildHud(f).hidden['#touchTools']).toBe(true);
+    f.menu = ''; f.intermission = 3; expect(buildHud(f).hidden['#touchTools']).toBe(true);
+    f.intermission = 0; f.bonus = bonus('canyon'); expect(buildHud(f).hidden).toMatchObject({ '#touchThrottle': true, '#touchBoost': false });
+    f.bonus = bonus('asteroids'); expect(buildHud(f).hidden['#touchBoost']).toBe(true);
+    f.bonus = bonus('sequence'); expect(buildHud(f).hidden['#touchBoost']).toBe(true);
+    f.bonus = null; f.definition.kind = 'armada'; expect(buildHud(f).hidden).toMatchObject({ '#touchThrottle': true, '#touchBoost': true });
+    f.run.cleared = true; expect(buildHud(f).hidden['#touchThrottle']).toBe(false);
+    f.run.mode = 'invaders'; expect(buildHud(f).hidden['#touchThrottle']).toBe(true);
+  });
   it('shows unconverted canyon cargo, numeric shields, and the paid conversion on the summary', () => {
     const f = frame('smuggler'); f.bonus = bonus('canyon'); f.bonus.state.haul = 3; f.bonus.state.shield = 40;
-    const cargo = [{ position: new Vector3(0, 0, -40), color: '#ffff70', glyph: 'cargo' as const }]; f.bonus.cargo = { contacts: cargo };
+    const cargo = [{ position: new Vector3(0, 0, -40), color: '#ffff70', glyph: 'cargo' as const }]; f.bonus.radarContacts = cargo;
     const view = buildHud(f); expect(view.text.shieldReadout).toBe('40 / 100'); expect(view.text.cargoReadout).toBe('HAUL 3 / +225 AT EXIT');
     expect(view.text.scoreReadout).toBe('000010'); expect(view.radar).toEqual(cargo);
     f.bonus = null; f.run.stageHaul = 3; f.run.pilot.score = 1535; f.intermission = 3;
@@ -36,7 +50,7 @@ describe('resource display is a projection, not independently updated state', ()
   it('projects skiff repair pickups onto the course radar', () => {
     const f = frame('smuggler'); f.bonus = bonus('canyon');
     const contacts = [{ position: new Vector3(10, 0, -50), color: '#70cfff', glyph: 'cargo' as const }];
-    f.bonus.repairs = { contacts }; expect(buildHud(f).radar).toEqual(contacts);
+    f.bonus.radarContacts = contacts; expect(buildHud(f).radar).toEqual(contacts);
   });
   for (const mode of ['journey', 'endless', 'invaders'] as const) for (const family of ['pulse', 'spread', 'lance'] as WeaponFamily[]) {
     it(`${mode} ${family} pickup and purchase always produce the new weapon readout`, () => {
@@ -68,6 +82,13 @@ describe('resource display is a projection, not independently updated state', ()
   });
 });
 describe('mission and course readouts', () => {
+  it('includes blue police and red pirate contacts during asteroid flight', () => {
+    const f = frame('smuggler'); f.bonus = bonus('asteroids');
+    const contacts = [{ position: new Vector3(10, 15, -300), color: '#75caff', glyph: 'ship' as const },
+      { position: new Vector3(-10, -15, -200), color: '#ff4055', glyph: 'ship' as const }];
+    f.bonus.radarContacts = contacts;
+    expect(buildHud(f).radar).toEqual(contacts);
+  });
   it('chooses the nearest live hostile for the objective indicator and ignores hidden contacts', () => {
     const f = frame('invaders'), near = actorFixture({ id: 1 }), far = actorFixture({ id: 2 }), hidden = actorFixture({ id: 3 });
     near.object.position.set(50, 0, -100); far.object.position.set(-300, 0, -400); hidden.object.visible = false;
@@ -99,6 +120,9 @@ describe('mission and course readouts', () => {
     if (kind === 'asteroids') f.bonus.asteroidRun = { speed: 150, exitApproach: true };
     if (kind === 'canyon') f.bonus.canyon = { speed: 250, boosting: true, nextGate: 18, penalty: 200, nextGatePoints: 0 };
     const model = buildHud(f); expect(model.text.weaponReadout).toBe('SPREAD 1'); expect(model.text.hullReadout).toBe('2 / 3'); expect(model.text.missionTitle).toBe('24 SECONDS'); expect(model.hidden['#bonusExitButton']).toBe(false);
+    expect(model.radarView).toEqual(COURSE_RADAR_VIEW); expect(model.hidden['#radar']).toBe(kind === 'sequence');
+    expect(buildHud({ ...f, bonus: null }).radarView).toEqual(SPACE_RADAR_VIEW);
+    expect(buildHud({ ...f, bonus: null }).hidden['#radar']).toBe(false);
     expect(model.text.missionProgress).toBe(kind === 'asteroids' ? 'FLY THROUGH THE EXIT GATE' : kind === 'canyon' ? 'FLY THROUGH EXIT' : 'NEXT MARKER 4 / 22');
     if (kind === 'sequence') { expect(model.text.levelClock).toBe('SHOTS 7'); expect(model.text.timeBonusReadout).toBe('BONUS SCORE 10'); }
     f.run.mode = 'smuggler'; expect(buildHud(f).hidden['#bonusExitButton']).toBe(true); expect(buildHud(f).text.creditReadout).toBe(kind === 'canyon' ? 'FLIGHT +10' : 'FLIGHT +250'); expect(buildHud(f).text.reputation).toBe('LEG START 0');

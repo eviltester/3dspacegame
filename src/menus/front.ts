@@ -27,7 +27,7 @@ export class FrontMenus {
       <p class="record-line">${CONTROL_LAYOUTS[profile.settings.controlScheme].name} / ${MODE_INFO[mode].name} BEST ${profile.records[mode]}</p>`];
   }
   static controls(profile: ProfileSaveV2, back = 'title'): MenuView {
-    return ['controls', 'CONTROLS', CONTROL_LAYOUTS[profile.settings.controlScheme].name, `${controlsView(profile.settings.controlScheme)}
+    return ['controls', 'CONTROLS', CONTROL_LAYOUTS[profile.settings.controlScheme].name, `${controlsView(profile.settings.controlScheme, profile.settings.tiltSensitivity)}
       <div class="settings-row">${button('assist', `AIM ASSIST: ${profile.settings.aimAssist ? 'ON' : 'OFF'}`)}${button('mute', `SOUND: ${profile.settings.muted ? 'OFF' : 'ON'}`)}</div>
       <div class="menu-actions">${button(back, 'BACK', 'id="launchButton"')}</div>`];
   }

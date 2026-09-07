@@ -14,6 +14,6 @@ export class HudController {
     for (const [selector, hidden] of Object.entries(model.hidden)) document.querySelector<HTMLElement>(selector)!.hidden = hidden;
     for (const [selector, style] of Object.entries(model.styles)) Object.assign(document.querySelector<HTMLElement>(selector)!.style, style);
     for (const [selector, title] of Object.entries(model.titles)) document.querySelector(selector)!.setAttribute('title', title);
-    if (model.radar) renderRadar(this.ui.radar.getContext('2d')!, model.radar, frame.position, frame.orientation);
+    if (model.radar) renderRadar(this.ui.radar.getContext('2d')!, model.radar, frame.position, frame.orientation, model.radarView);
   }
 }

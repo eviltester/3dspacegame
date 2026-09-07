@@ -4,6 +4,7 @@ import { ASTEROID_DURATION, ASTEROID_LENGTH, asteroidFlight, asteroidGap, BonusC
 import { clone, newRun, resources, settleBonus } from './arcade';
 import { bonusProfile } from './bonus-difficulty';
 import { ASTEROID_COLORS, COLORS } from './models/primitives';
+import { asteroidTrafficCount } from './asteroid-traffic';
 
 vi.mock('./models', async original => ({ ...await original<typeof import('./models')>(), createTextSprite: () => new THREE.Group() }));
 
@@ -27,7 +28,7 @@ it.each([1, 4, 8])('scatters rocks above, below and in depth without blocking th
   for (const seed of [1, 12, 99]) {
     const bonus = new BonusController('asteroids', seed, difficulty), repeat = new BonusController('asteroids', seed, difficulty);
     const rocks = bonus.rocks;
-    expect(rocks).toHaveLength(bonusProfile(difficulty).asteroidRows * 2);
+    expect(rocks).toHaveLength(bonusProfile(difficulty).asteroidRows * 2 - asteroidTrafficCount(difficulty));
     expect(rocks.map(({ id, ...rock }) => rock)).toEqual(repeat.rocks.map(({ id, ...rock }) => rock));
     const quadrants = new Set<number>();
     let above = 0, below = 0, staggered = 0;

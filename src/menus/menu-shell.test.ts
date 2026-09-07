@@ -67,7 +67,7 @@ it.each(CONTROL_SCHEMES)('%s settings preserve focus after the owner rebuilds th
   await user.click(screen.getByRole('button', { name: CONTROL_LAYOUTS[scheme].name }));
   const selected = screen.getByRole('button', { name: CONTROL_LAYOUTS[scheme].name });
   expect(selected.getAttribute('aria-pressed')).toBe('true'); expect(document.activeElement).toBe(selected);
-  expect(screen.getByText(`HOLD ${CONTROL_LAYOUTS[scheme].fire}`)).toBeTruthy();
+  expect(screen.getByText(scheme === 'touch' ? 'LEFT SIDE' : `HOLD ${CONTROL_LAYOUTS[scheme].fire}`)).toBeTruthy();
   expect(action).toHaveBeenCalledExactlyOnceWith(`controls:${scheme}`);
 });
 

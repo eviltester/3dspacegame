@@ -70,3 +70,29 @@ it.each(['shot', 'blast'] as const)('%s gun kills pay two hundred points, with n
   action(); expect(gun.used).toBe(true); expect(bonus.state.points).toBe(200);
   action(); expect(bonus.state.points).toBe(method === 'shot' ? 150 : 200); bonus.dispose();
 });
+it('a solid pillar impact drains shields, deflects the skiff and never halts forward progress', () => {
+  const bonus = new BonusController('canyon', 3, 2), canyon = bonus.canyon!, camera = new THREE.PerspectiveCamera();
+  for (const target of canyon.targets) target.used = true;
+  const item = canyon.barriers.items[0]; item.base.set(0, -32, -15);
+  bonus.step(0.01, { x: 0, y: 0 }, camera);
+  for (let tick = 0; tick < 120; tick++) bonus.step(1 / 60, { x: 0, y: 0 }, camera);
+  expect(bonus.state.shield).toBe(0); expect(bonus.state.health).toBe(3);
+  expect(item.collided).toBe(true); expect(camera.position.z).toBeLessThan(-90);
+  expect(Math.abs(canyon.offset.x)).toBeGreaterThan(5); expect(bonus.state.finished).toBe(false); bonus.dispose();
+});
+it('solid scenery blocks primary and enemy fire, survives a blast, and leaves open-lane targets shootable', () => {
+  const bonus = new BonusController('canyon', 3, 2), canyon = bonus.canyon!, camera = new THREE.PerspectiveCamera();
+  for (const target of canyon.targets) target.used = true;
+  canyon.barriers.items[0].base.set(0, -32, -100);
+  bonus.step(0, { x: 0, y: 0 }, camera);
+  const gun = canyon.targets.find(target => target.kind === 'turret')!; gun.used = false; gun.object.position.set(0, 0, -160);
+  expect(bonus.shoot(camera)).toBe(false); expect(gun.used).toBe(false); expect(bonus.state.points).toBe(-50);
+  const object = new THREE.Group(); object.position.set(0, 0, -150);
+  canyon.shots.push({ kind: 'hostileBolt', object, radius: 2, number: 0, used: false, life: 4, velocity: new THREE.Vector3(0, 0, 1000) });
+  bonus.step(0.2, { x: 0, y: 0 }, camera);
+  expect(canyon.shots).toHaveLength(0); expect(bonus.state.shield).toBe(100);
+  gun.object.position.x = 30; camera.lookAt(gun.object.position);
+  expect(bonus.shoot(camera)).toBe(true); expect(gun.used).toBe(true);
+  expect(bonus.blast(camera)).toBe(true); expect(canyon.barriers.items[0].object.visible).toBe(true);
+  bonus.dispose();
+});

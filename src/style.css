@@ -276,3 +276,32 @@ button { font: inherit; }
 @media (max-width: 380px) {
   .bottom-strip strong { font-size: 12px; white-space: nowrap; }
 }
+
+/* Suppress browser gestures only over the flying surface, never over menus. */
+.viewport canvas.touch-flight { touch-action: none; user-select: none; -webkit-user-select: none; }
+.touch-tools, #touchThrottle { display: flex; gap: 8px; }
+.touch-controls .flight-buttons { flex-direction: row; flex-wrap: wrap; gap: 8px; max-width: calc(100% - 30px); }
+.touch-controls .flight-buttons button { min-width: 44px; min-height: 44px; touch-action: manipulation; }
+.touch-tools button { font-size: 20px; }
+.flight-buttons button:disabled { color: #65706a; border-color: #343e38; }
+.motion-settings { margin-block: 16px; }
+.motion-settings p { font-size: 12px; line-height: 1.5; }
+.tilt-setting { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 12px; color: #8affb0; }
+.tilt-setting input { flex: 1; min-width: 100px; min-height: 44px; accent-color: #ffff70; }
+.tilt-setting output { min-width: 4ch; }
+@media (max-width: 760px) {
+  .control-select { flex-wrap: wrap; }
+  .launch-overlay .control-select button { flex: 1 0 40%; min-height: 44px; }
+  .touch-controls .flight-buttons { top: 170px; }
+  .touch-controls .objective-arrow { top: 230px; }
+  .touch-controls .threat-arrow { top: 250px; }
+  .touch-controls .wanted-banner { top: 272px; }
+  .touch-controls .hit-callout { top: 300px; }
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  .touch-controls .flight-buttons { top: 100px; }
+  .touch-controls .radar { width: 90px; height: 90px; }
+  .touch-controls .bottom-strip { left: 120px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .touch-controls .arcade-strip { bottom: 78px; left: 120px; }
+  .touch-controls .message-log { bottom: 104px; min-height: 0; }
+}

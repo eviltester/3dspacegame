@@ -11,7 +11,8 @@ import type { Actor } from '../combat/types';
 import type { EncounterDirector, StageDefinition } from '../encounters';
 import { throttleReadout } from '../input';
 import { CONTROL_LAYOUTS } from '../input-layouts';
-import type { RadarContact } from '../radar';
+import { COURSE_RADAR_VIEW, SPACE_RADAR_VIEW } from '../radar';
+import type { RadarContact, RadarView } from '../radar';
 import { MODE_INFO } from '../modes';
 import { WEAPON_HELP } from '../weapons';
 import { accuracyPercent } from '../combat/accuracy';
@@ -27,8 +28,7 @@ export interface HudFrame {
     state: Pick<BonusRunState, 'kind' | 'difficulty' | 'points' | 'health' | 'shield' | 'haul' | 'family' | 'charge' | 'remaining' | 'targetCount' | 'nextMarker' | 'shotsFired'>;
     canyon?: { speed: number; boosting: boolean; nextGate: number; penalty: number; nextGatePoints: number } | null;
     asteroidRun?: { speed: number; exitApproach: boolean } | null;
-    repairs?: { contacts: RadarContact[] };
-    cargo?: { contacts: RadarContact[] };
+    radarContacts?: RadarContact[];
   } | null;
   definition: Pick<StageDefinition, 'kind' | 'title'>;
   actors: readonly Actor[];
@@ -60,10 +60,11 @@ export interface HudModel {
   styles: Record<string, { color?: string; opacity?: string }>;
   titles: Record<string, string>;
   radar: RadarContact[] | null;
+  radarView: RadarView;
 }
 
 export function buildHud(frame: HudFrame, now = 0): HudModel {
-  const model: HudModel = { text: {}, classes: [], hidden: {}, styles: {}, titles: {}, radar: null };
+  const model: HudModel = { text: {}, classes: [], hidden: {}, styles: {}, titles: {}, radar: null, radarView: SPACE_RADAR_VIEW };
   const text = (id: string, value: string) => { model.text[id] = value; };
   const toggle = (selector: string, name: string, active: boolean) => { model.classes.push({ selector, name, active }); };
   const hostiles = () => frame.actors.filter(actor => !actor.dead && (actor.kind === 'pirate' || actor.kind === 'mine'));
@@ -79,6 +80,12 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   };
   const protectedFlight = frame.protection > 0 && !frame.menu;
   const intermission = frame.intermission > 0 && !frame.menu;
+  const touch = frame.profile.settings.controlScheme === 'touch';
+  const armadaLocked = frame.definition.kind === 'armada' && (!frame.run?.cleared || frame.run.mode === 'invaders') && !frame.bonus;
+  model.hidden['#touchTools'] = !touch || !!frame.menu || intermission;
+  model.hidden['#touchThrottle'] = !!frame.bonus || armadaLocked;
+  model.hidden['#touchBoost'] = armadaLocked || !!frame.bonus && frame.bonus.state.kind !== 'canyon';
+  toggle('.game-shell', 'touch-controls', touch);
   model.hidden['#courseSummary'] = !intermission;
   toggle('.game-shell', 'course-intermission', intermission);
   toggle('.game-shell', 'protected-flight', protectedFlight);
@@ -99,6 +106,10 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
     return model;
   }
   const bonus = frame.bonus?.state;
+  model.hidden['#radar'] = bonus?.kind === 'sequence';
+  if (bonus) model.radarView = COURSE_RADAR_VIEW;
+  model.titles['#radar'] = bonus ? 'Course radar: circles are rocks; squares are obstacles; triangles are pickups; crosses are gates. Vertical lines show height.'
+    : 'Ship-relative radar: triangles are pickups; crosses are Warp Gates. Vertical lines show height.';
   const smuggler = run.mode === 'smuggler';
   const invaders = run.mode === 'invaders';
   const score = smuggler && bonus ? smugglerFlightScore(pilot.score, bonus) : pilot.score;
@@ -127,7 +138,6 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   const charge = bonus?.charge ?? run.charge;
   const controls = CONTROL_LAYOUTS[frame.profile.settings.controlScheme];
   text('chargeReadout', charge >= 100 ? `BLAST READY / ${controls.blast}` : `BLAST ${charge}%${canyon?.penalty ? ' / PAUSED' : ''}`);
-  const armadaLocked = frame.definition.kind === 'armada' && (!run.cleared || run.mode === 'invaders') && !bonus;
   model.hidden['.reticle'] = armadaLocked;
   text('missionTitle', bonus ? `${Math.ceil(bonus.remaining)} SECONDS` : run.phase === 'recovery' ? `NEXT WAVE IN ${Math.ceil(frame.recovery)}` : run.cleared ? 'MISSION COMPLETE' : armadaLocked ? run.mode === 'invaders' ? 'BREAK THE FORMATION' : 'TRACTOR BEAM LOCKED' : frame.definition.kind === 'boss' ? 'BREAK THE OUTER SYSTEMS' : 'CLEAR THE PIRATE FLIGHTS');
   const arrival = frame.arrivalTime > 0 && run.phase === 'playing' && !bonus;
@@ -156,7 +166,7 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   if (!destination && hostiles().length) destination = hostiles().sort((a, b) => a.object.position.distanceToSquared(frame.position) - b.object.position.distanceToSquared(frame.position))[0];
   indicator('objectiveArrow', bonus ? null : destination, run.cleared ? 'WARP' : destination?.faction === 'pirate' ? run.mode === 'invaders' ? 'ALIEN' : 'PIRATE' : 'OBJECTIVE');
   indicator('threatArrow', bonus ? null : frame.threat, 'INCOMING');
-  model.radar = frame.bonus ? [...frame.bonus.repairs?.contacts ?? [], ...frame.bonus.cargo?.contacts ?? []] : frame.actors
+  model.radar = frame.bonus ? frame.bonus.radarContacts ?? [] : frame.actors
     .filter(actor => !actor.dead && actor.object.visible && actor.kind !== 'part')
     .map(actor => ({ position: actor.object.position,
       color: actor.faction === 'pirate' ? '#ff4055' : actor.faction === 'police' ? '#75caff' : actor.faction === 'trader' ? '#60ff85' : actor.kind === 'market' || actor.drop?.type === 'contraband' ? '#ff55ef' : '#ffff70',

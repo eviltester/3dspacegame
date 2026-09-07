@@ -50,6 +50,16 @@ describe('menu views', () => {
     expect(view).not.toMatch(/mouse|click/i);
     expect(view).toContain(scheme === 'wasd' ? 'Hold J to fire. K uses' : 'Hold Z to fire. X uses');
   });
+  it.each(['mouse', 'touch'] as const)('uses %s controls in course briefings', scheme => {
+    const run = newRun('smuggler', 1); run.stage = 2;
+    const main = MenuViews.briefing(run, stageDefinition('smuggler', 2), scheme)[3];
+    const optional = MenuViews.bonusOffer(newRun('journey', 1), 'canyon', scheme)[3];
+    for (const content of [main, optional]) {
+      expect(content).toContain(scheme === 'touch' ? 'on-screen Boost button' : 'Shift or wheel forward');
+      expect(content).toContain(scheme === 'touch' ? 'on-screen Pause button' : 'Esc pauses');
+      if (scheme === 'touch') expect(content).not.toMatch(/\b(Esc|Shift|wheel|click)\b/i);
+    }
+  });
   it('lists every stage and difficulty with practice-safe navigation', () => {
     const content = MenuViews.levelWarp(null)[3];
     expect(content).toContain('99.'); expect(content).toContain('MAXIMUM'); expect(content).toContain('warpBonus:canyon');

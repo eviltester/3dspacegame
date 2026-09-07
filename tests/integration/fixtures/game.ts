@@ -24,7 +24,7 @@ vi.mock('three', async importOriginal => {
 const context = {
   save() {}, restore() {}, clearRect() {}, fillRect() {}, fillText() {},
   scale() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {},
-  arc() {}, ellipse() {}, stroke() {}, fill() {}, setLineDash() {}
+  arc() {}, ellipse() {}, rect() {}, stroke() {}, fill() {}, setLineDash() {}
 } as unknown as CanvasRenderingContext2D;
 
 const listeners: Array<() => void> = [];

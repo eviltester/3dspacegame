@@ -10,6 +10,8 @@ import { ASTEROID_COLORS, edgesFromGeometry, createPulseRing } from './primitive
 import { createEnemyModel, createInvaderModel, createPoliceModel, createTraderHaulerModel, createTraderUfoModel, createCanyonTurret } from './ships';
 import { createCargoModel, createBaseModel, createPlanetModel, createBlackMarketModel, createGateModel, createCanyonGate } from './landmarks';
 import { createSkiffRepairModel } from './skiff-repairs';
+import { createCanyonBarrierModel } from '../canyon-barriers';
+import type { CanyonBarrierKind } from '../canyon-barriers';
 
 export interface CatalogItem { title: string; description: string; create: () => THREE.Object3D; scale: number; cameraZ: number }
 
@@ -49,5 +51,16 @@ export function createCatalog(): CatalogItem[] {
     { title: 'CANYON GUN', description: 'Flashes yellow before firing. Destroy it for 200 points or intercept its shots for 10. Each hit costs 20 shield, or one hull point when shields are empty.', create: createCanyonTurret, scale: 2, cameraZ: 62 },
     { title: 'CANYON CRATE', description: 'Amber obstacles. Shooting one has a 1 in 5 chance to release yellow haul. Collect the pickup and deliver it at EXIT for 75 points. The crate itself gives no score.', create: () => edgesFromGeometry(new THREE.OctahedronGeometry(8), 0xffbf48), scale: 2, cameraZ: 62 }
   );
+  const barriers: Array<[CanyonBarrierKind, string, string, number, number]> = [
+    ['pillar', 'CANYON PILLAR', 'Full-height column. Dodge to either side; an impact empties shields and knocks your skiff clear.', 10, 36],
+    ['halfPillar', 'LOW CANYON PILLAR', 'Fixed half-height column. Pass above it or to either side.', 10, 18],
+    ['risingPillar', 'RISING PILLAR', 'Rises to full canyon height, then retracts completely into the floor. Watch its exposed height.', 10, 36],
+    ['risingHalfPillar', 'LOW RISING PILLAR', 'Rises only halfway up the canyon, then retracts completely. The upper lane stays open.', 10, 18],
+    ['sideWall', 'CANYON SIDE WALL', 'Extends halfway across from one canyon side. Dodge into the open half; cannot be destroyed.', 20, 36],
+    ['floorWall', 'CANYON FLOOR WALL', 'Half-height wall across the floor. Fly over it; shots cannot pass through it.', 36, 18]
+  ];
+  for (const [kind, title, description, width, height] of barriers) items.push({ title, description, scale: 1, cameraZ: 62,
+    create: () => { const group = new THREE.Group(), object = createCanyonBarrierModel(kind);
+      object.scale.set(width, height, 8); group.add(object); return group; } });
   return items;
 }

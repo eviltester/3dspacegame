@@ -34,6 +34,8 @@ import { ActorWorld } from './world/actors';
 import { WorldInteractions } from './world/interactions';
 import type { Actor } from './combat/types';
 import { FlightInput } from './input';
+import { touchCapable } from './mobile/motion';
+import { MobileControls } from './mobile/controls';
 import { moveShip } from './flight-motion';
 import { assistedAim } from './combat/aim';
 import { WeaponFire } from './combat/weapon-fire';
@@ -63,6 +65,7 @@ export class ArcadeGame {
   readonly renderer: THREE.WebGLRenderer;
   readonly sound = new SoundBank();
   readonly input: FlightInput;
+  private readonly mobileControls: MobileControls;
   private profile: ProfileSaveV2;
   // A title screen can exist without a run. profile holds long-lived progress;
   // runState is the one active flight, whose stage resources can be rolled back.
@@ -144,7 +147,7 @@ export class ArcadeGame {
     let raw: string | null = null;
     let legacy: string | null = null;
     try { raw = localStorage.getItem(SAVE_V2); legacy = localStorage.getItem(SAVE_KEY); } catch { /* Play without persistence when browser storage is unavailable. */ }
-    this.profile = parseProfile(raw, legacy);
+    this.profile = parseProfile(raw, legacy, touchCapable() ? 'touch' : 'mouse');
     try { this.levelWarpUnlocked = sessionStorage.getItem(LEVEL_WARP_KEY) === 'unlocked'; } catch { /* Unlock still works without storage. */ }
     this.ui = new GameUI(action => this.action(action));
     this.hudController = new HudController(this.ui);
@@ -156,7 +159,8 @@ export class ArcadeGame {
     this.scene.fog = new THREE.FogExp2(0, 0.00035);
     this.stars = createStarfield();
     this.scene.add(this.stars);
-    this.input = new FlightInput(this.renderer.domElement, () => this.pause(), () => this.special(), command => this.switchWeapon(command));
+    this.input = new FlightInput(this.renderer.domElement, () => this.pause(), () => this.special(), command => this.switchWeapon(command), () => this.mobileControls?.refresh());
+    this.mobileControls = new MobileControls(this.input, this.profile, () => this.persist());
     this.input.setScheme(this.profile.settings.controlScheme);
     this.renderer.domElement.tabIndex = -1;
     window.addEventListener('resize', () => this.resize());
@@ -184,6 +188,7 @@ export class ArcadeGame {
     this.levelWarpCode.reset();
     this.input.release();
     this.ui.show(screen, title, status, content);
+    this.mobileControls.refresh();
   }
   private showTitle(): void {
     this.flight.paused = false;
@@ -238,6 +243,7 @@ export class ArcadeGame {
       <p class="menu-description">${this.run.practice ? 'TEST FLIGHT / SAVED PROGRESS SAFE' : this.run.mode === 'smuggler' ? 'Leaving restarts this leg. Your score and lives are preserved.' : this.bonus ? 'Your main ship and lives are safe.' : 'Leaving saves the current stage checkpoint.'}</p>`);
   }
   private action(action: string): void {
+    if (this.mobileControls.action(action)) return;
     // Menu markup supplies data-action strings. Route commands here; menu builders
     // only describe what to display and do not mutate gameplay themselves.
     if (action === 'controls') { this.controlsReturn = this.flight.menu === 'pause' ? 'backToPause' : 'title'; this.show(...FrontMenus.controls(this.profile, this.controlsReturn)); return; }

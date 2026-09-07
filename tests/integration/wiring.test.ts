@@ -5,9 +5,41 @@ import { LEVEL_WARP_KEY } from '../../src/level-warp';
 import { SAVE_V2 } from '../../src/arcade';
 import { ShotAccuracy } from '../../src/combat/accuracy';
 import { BonusController } from '../../src/bonus';
+import * as radar from '../../src/radar';
 
 // Check adapters, not whole flights. Rules and edge cases belong beside their
 // controllers; these cases only verify that the application calls them.
+it.each(['journey', 'endless', 'invaders', 'smuggler'] as const)('%s consumes touch steering, fire and weapon selection without pointer lock', async mode => {
+  const game = new GameHarness();
+  await game.action('controls'); await game.action('controls:touch'); await game.action('title'); await game.start(mode);
+  const input = game.app.input.mobile.gestures;
+  expect(document.pointerLockElement).toBeNull();
+  const before = game.state(); input.down(1, 'left', 0, 0, 0); input.move(1, 30, 10, true);
+  vi.spyOn(performance, 'now').mockReturnValue(300); game.step(1 / 60);
+  const fired = game.state();
+  expect(mode === 'smuggler' ? fired.bonus?.shotsFired : fired.stats.shots).toBeGreaterThan(0);
+  expect(mode === 'invaders' ? fired.position : mode === 'smuggler' ? fired.view.position : fired.orientation)
+    .not.toEqual(mode === 'invaders' ? before.position : mode === 'smuggler' ? before.view.position : before.orientation);
+  input.up(1, 310);
+  input.down(2, 'right', 100, 0, 320); input.up(2, 340); input.down(3, 'right', 100, 0, 350); input.up(3, 370);
+  vi.spyOn(performance, 'now').mockReturnValue(380); game.step(1 / 60);
+  expect(game.text('#weaponReadout')).toContain('SPREAD');
+  await game.action('pause'); const paused = game.state().elapsed;
+  game.step(1); expect(game.state().elapsed).toBe(paused);
+  await game.action('unpause'); expect(game.app.input.consumeFire()).toBe(false);
+});
+it('Smuggler radar receives live course objects, magnified lanes and the moving skiff camera', async () => {
+  const draw = vi.spyOn(radar, 'renderRadar'), game = new GameHarness(); await game.start('smuggler');
+  game.step(0.05);
+  const [, contacts, position, orientation, view] = draw.mock.lastCall!;
+  expect(contacts.some(contact => contact.glyph === 'rock')).toBe(true);
+  expect(contacts.some(contact => contact.glyph === 'cargo')).toBe(true);
+  expect(contacts.some(contact => contact.glyph === 'gate')).toBe(true);
+  expect(position.toArray()).toEqual(game.state().view.position);
+  expect(orientation.toArray()).toEqual(game.state().view.orientation);
+  expect(view).toEqual(radar.COURSE_RADAR_VIEW);
+  expect(position.z).toBeLessThan(0);
+});
 it('menu actions launch and pause the lifecycle controller', async () => {
   const game = new GameHarness(); await game.start();
   expect(game.state().menu).toBe(''); expect(game.state().phase).toBe('playing');

@@ -7,6 +7,7 @@ import { canyonSpeed, CANYON_GUN_WARNING, CANYON_MAX_BOLTS } from './canyon';
 import { stageDefinition } from './encounters';
 import { ARMADA_LANE_LIMIT, armadaFormationPosition, configureArmadaCamera } from './armada';
 import { createWarpRun, WARP_BONUSES } from './level-warp';
+import { asteroidTrafficCount } from './asteroid-traffic';
 
 vi.mock('./models', async original => ({ ...await original<typeof import('./models')>(), createTextSprite: () => new THREE.Group() }));
 
@@ -37,9 +38,11 @@ it('raises density, flight and motion smoothly, while preserving attack warning 
   expect(CANYON_GUN_WARNING).toBeGreaterThanOrEqual(0.7); expect(CANYON_MAX_BOLTS).toBe(24);
 });
 
-it.each([2, 5, 8])('retains a damage-free asteroid route to the exit on difficulty %s', level => {
+it.each([2, 5, 8])('retains a damage-free route through the static rocks to the exit on difficulty %s', level => {
   const bonus = new BonusController('asteroids', 0x1984, level), camera = new THREE.PerspectiveCamera();
-  expect(bonus.rocks).toHaveLength(bonusProfile(level).asteroidRows * 2);
+  expect(bonus.rocks).toHaveLength(bonusProfile(level).asteroidRows * 2 - asteroidTrafficCount(level));
+  // Isolate rock placement from the separately exercised oncoming traffic.
+  for (const ship of bonus.traffic!.ships) ship.used = true;
   let previous = new THREE.Vector2();
   for (let tick = 1; tick < 3601 && !bonus.state.finished; tick++) {
     const gap = asteroidGap(Math.min(55, asteroidFlight(tick / 60, level).progress * 58));
@@ -60,6 +63,17 @@ it.each([2, 5, 8])('keeps canyon gates and obstacles traversable at difficulty %
   for (let tick = 0; tick < 5000 && !bonus.state.finished; tick++) {
     const gate = course.gates.find(g => !g.resolved)!;
     const target = gate.object.position.clone().sub(course.path.getPointAt(gate.progress));
+    const barrier = course.barriers.items.find(item => {
+      const ahead = camera.position.z - item.base.z;
+      return ahead > -15 && ahead < 65;
+    });
+    if (barrier) {
+      // A bounded dodge between gates: opposite half for side walls, above floor walls,
+      // and the clear centre lane for narrow columns (including retracting ones).
+      const center = course.path.getPointAt(course.progress);
+      target.set(barrier.kind === 'sideWall' ? (barrier.base.x > center.x ? -12 : 12) : 0,
+        barrier.kind === 'floorWall' ? 12 : 0, 0);
+    }
     bonus.step(1 / 60, { x: (target.x - course.offset.x) / 0.13, y: -(target.y - course.offset.y) / 0.13, boost: true }, camera);
   }
   expect(bonus.state.reason).toBe('complete'); expect(course.passed).toBe(18); expect(bonus.state.health).toBe(3);

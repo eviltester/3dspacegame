@@ -11,6 +11,7 @@ import { sweptHit } from './weapons';
 import { CanyonGateScore, canyonGatePoints } from './canyon-gates';
 import { updateCanyonGateVisual } from './rendering/canyon-gates';
 import type { CanyonImpact } from './canyon-combat';
+import { CanyonBarriers } from './canyon-barriers';
 
 export type CanyonEnd = 'complete' | 'wall';
 export interface CanyonTarget {
@@ -45,6 +46,7 @@ export class CanyonCourse {
   readonly targets: CanyonTarget[] = [];
   readonly offset = new THREE.Vector2();
   readonly gateScore = new CanyonGateScore();
+  readonly barriers: CanyonBarriers;
   get penalty(): number { return this.gateScore.penalty; }
   get gatePointsAvailable(): number { return this.gates.filter(gate => !gate.exit).reduce((sum, gate) => sum + canyonGatePoints(gate), 0); }
   get nextGatePoints(): number { const gate = this.gates.find(gate => !gate.resolved); return gate && !gate.exit ? canyonGatePoints(gate) : 0; }
@@ -66,6 +68,7 @@ export class CanyonCourse {
     const profile = this.profile = bonusProfile(difficulty);
     this.speed = canyonSpeed(0, false, profile.level);
     this.length = this.path.getLength();
+    this.barriers = new CanyonBarriers(root, this.path, seed, profile.level);
     const rng = new Random(seed);
     // Draw successive cross-sections along the same curve used for flight. Geometry,
     // gates and targets therefore agree on where the traversable corridor lies.
@@ -126,6 +129,9 @@ export class CanyonCourse {
     this.offset.y = THREE.MathUtils.clamp(this.offset.y - look.y * 0.13, -24, 30);
     const center = this.path.getPointAt(this.progress);
     camera.position.copy(center).add(new THREE.Vector3(this.offset.x, this.offset.y, 0));
+    const impacts = this.barriers.step(this.elapsed, this.previous, camera.position, center, this.offset);
+    for (let i = 0; i < impacts; i++) events.damage.push('collision');
+    if (impacts) events.notice = 'OBSTACLE IMPACT / SKIFF DEFLECTED';
     camera.lookAt(this.path.getPointAt(Math.min(1, this.progress + 0.015)).add(new THREE.Vector3(this.offset.x, this.offset.y, 0)));
     camera.rotateZ(-this.offset.x * 0.002);
     if (Math.abs(this.offset.x) > 36 || this.offset.y < -22) events.damage.push('wall');
@@ -185,7 +191,10 @@ export class CanyonCourse {
     for (const bolt of this.shots) {
       if (bolt.used) continue;
       const previous = bolt.object.position.clone(); bolt.life -= dt; bolt.object.position.addScaledVector(bolt.velocity, dt);
-      if (sweptHit(this.previous, camera.position, previous, bolt.object.position, bolt.radius + 2) !== null) { events.damage.push('gun'); bolt.used = true; }
+      const hit = sweptHit(this.previous, camera.position, previous, bolt.object.position, bolt.radius + 2);
+      const blocked = this.barriers.hitTime(previous, bolt.object.position, bolt.radius);
+      if (blocked !== null && (hit === null || blocked <= hit)) bolt.used = true;
+      else if (hit !== null) { events.damage.push('gun'); bolt.used = true; }
       if (bolt.life <= 0 || bolt.object.position.z > camera.position.z + 70) bolt.used = true;
     }
     this.shots = this.shots.filter(bolt => {
@@ -204,6 +213,7 @@ export class CanyonCourse {
     return { progress: this.progress, speed: this.speed, boosting: this.boosting, offset: this.offset.toArray(), passed: this.passed,
       missed: this.missed, penalty: this.penalty, nextGate: this.nextGate, fired: this.fired,
       gates: this.gates.map(g => ({ position: g.object.position.toArray(), offset: g.object.position.clone().sub(this.path.getPointAt(g.progress)).toArray(), radius: g.radius, small: g.small, moving: g.motion > 0, points: g.exit ? 0 : canyonGatePoints(g), progress: g.progress, resolved: g.resolved, passed: g.passed, exit: g.exit })),
+      barriers: this.barriers.snapshot,
       targets: this.targets.filter(t => !t.used).map(t => ({ kind: t.kind, position: t.object.position.toArray(), radius: t.radius })),
       shots: this.shots.filter(b => !b.used).map(b => ({ position: b.object.position.toArray() })) };
   }

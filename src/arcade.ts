@@ -6,7 +6,7 @@
  */
 import { applyCargoPickup, createInitialProgress, instantTrade } from './logic';
 import type { CargoDrop, CargoType, Faction, PlayerProgress } from './logic';
-import { isControlScheme } from './input-layouts';
+import { isControlScheme, tiltSensitivity } from './input-layouts';
 import type { ControlScheme } from './input-layouts';
 import { GAME_MODES, SMUGGLER_EXTRA_LIFE_SCORE } from './modes';
 import type { GameMode } from './modes';
@@ -64,7 +64,7 @@ export interface RunState extends RunResources {
 // starting-weapon unlocks are choices, never permanent damage or money bonuses.
 export interface ProfileSaveV2 {
   version: 2;
-  settings: { aimAssist: boolean; muted: boolean; controlScheme: ControlScheme };
+  settings: { aimAssist: boolean; muted: boolean; controlScheme: ControlScheme; tiltSensitivity: number };
   unlocked: WeaponFamily[];
   records: Record<GameMode | `${GameMode}Continued`, number>;
   scoreboards: Scoreboards;
@@ -285,7 +285,7 @@ export function freshProfile(legacy: unknown = null): ProfileSaveV2 {
   const unlocked: WeaponFamily[] = ['pulse'];
   if (Number(old.unlockedWeaponLevel) >= 2) unlocked.push('spread');
   if (Number(old.unlockedWeaponLevel) >= 3) unlocked.push('lance');
-  return { version: 2, settings: { aimAssist: true, muted: false, controlScheme: 'mouse' }, unlocked, legacyScore: Math.max(0, Number(old.bestScore) || 0),
+  return { version: 2, settings: { aimAssist: true, muted: false, controlScheme: 'mouse', tiltSensitivity: 1 }, unlocked, legacyScore: Math.max(0, Number(old.bestScore) || 0),
     records: { journey: 0, endless: 0, invaders: 0, smuggler: 0, journeyContinued: 0, endlessContinued: 0, invadersContinued: 0, smugglerContinued: 0 }, scoreboards: emptyScoreboards(), checkpoints: {} };
 }
 /**
@@ -305,19 +305,22 @@ export function saveCheckpoint(profile: ProfileSaveV2, run: RunState): void {
   profile.checkpoints[run.mode] = saved;
 }
 /** Validate stored profiles and supply defaults for missing fields. */
-export function parseProfile(raw: string | null, legacy: string | null): ProfileSaveV2 {
+export function parseProfile(raw: string | null, legacy: string | null, defaultScheme: ControlScheme = 'mouse'): ProfileSaveV2 {
   let old: unknown = null;
   try { old = legacy ? JSON.parse(legacy) : null; } catch { /* Invalid imported data must not prevent a new game. */ }
   const fallback = freshProfile(old);
+  fallback.settings.controlScheme = defaultScheme;
   if (!raw) return fallback;
   try {
     const parsed = JSON.parse(raw) as ProfileSaveV2;
     if (parsed.version !== 2) return fallback;
     const profile = freshProfile(old);
+    profile.settings.controlScheme = defaultScheme;
     profile.unlocked = FAMILIES.filter(family => family === 'pulse' || parsed.unlocked?.includes(family));
     profile.settings.aimAssist = parsed.settings?.aimAssist !== false;
     profile.settings.muted = parsed.settings?.muted === true;
     if (isControlScheme(parsed.settings?.controlScheme)) profile.settings.controlScheme = parsed.settings.controlScheme;
+    profile.settings.tiltSensitivity = tiltSensitivity(parsed.settings?.tiltSensitivity);
     profile.legacyScore = Math.max(fallback.legacyScore, Number(parsed.legacyScore) || 0);
     profile.scoreboards = parseScoreboards(parsed.scoreboards);
     for (const key of Object.keys(profile.records) as Array<keyof typeof profile.records>) profile.records[key] = Math.max(0, Number(parsed.records?.[key]) || 0);
