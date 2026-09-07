@@ -8,6 +8,8 @@ export const MIN_THROTTLE = -90;
 export const MAX_THROTTLE = 180;
 export const MOUSE_PAUSE_HOLD_MS = 600;
 
+export interface FlightCommand { x: number; y: number; roll: number; speed: number; boost: boolean }
+
 export function weaponKey(code: string): WeaponCommand | null {
   if (code === 'Digit1' || code === 'Numpad1') return 'pulse';
   if (code === 'Digit2' || code === 'Numpad2') return 'spread';
@@ -131,7 +133,7 @@ export class FlightInput {
     return requested;
   }
   private held(codes: readonly string[]): boolean { return codes.some(code => this.keys.has(code)); }
-  consume(dt: number): { x: number; y: number; roll: number; speed: number; boost: boolean } {
+  consume(dt: number): FlightCommand {
     // Mouse input is already a displacement; held keys are rates multiplied by dt.
     // Only transient deltas are consumed. The selected throttle is deliberately kept.
     const layout = CONTROL_LAYOUTS[this.scheme];

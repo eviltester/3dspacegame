@@ -4,7 +4,7 @@ import { FAMILIES } from '../arcade';
 import { GAME_MODES, MODE_INFO } from '../modes';
 import { WEAPON_HELP } from '../weapons';
 import { CONTROL_LAYOUTS } from '../input-layouts';
-import { button } from '../ui';
+import { button } from './menu-shell';
 import { controlsView } from './controls';
 import type { MenuView } from './views';
 

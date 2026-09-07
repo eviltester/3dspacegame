@@ -1,6 +1,6 @@
 import { CONTROL_LAYOUTS, CONTROL_SCHEMES } from '../input-layouts';
 import type { ControlScheme } from '../input-layouts';
-import { button } from '../ui';
+import { button } from './menu-shell';
 
 export function controlsView(scheme: ControlScheme): string {
   const layout = CONTROL_LAYOUTS[scheme];

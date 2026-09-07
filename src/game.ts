@@ -14,7 +14,7 @@ import { PlayerProtection } from './rendering/player-protection';
 import { bonusFor, clone, dock, newRun, parseProfile, pickup, purchase, recordRun, retry, rewardInterception, rewardKill, SAVE_V2, saveCheckpoint, tickChain } from './arcade';
 import { settleTimeBonus, STAGE_TIME_LIMIT, tickStageTime, timeBonusSeconds, TIME_BONUS_RATE } from './arcade';
 import type { BonusKind, EnemyArchetype, GameMode, ProfileSaveV2, Purchase, RunState, WeaponFamily } from './arcade';
-import { ARMADA_LANE_LIMIT, configureArmadaCamera } from './armada';
+import { configureArmadaCamera } from './armada';
 import { BONUS_NAMES, BonusController } from './bonus';
 import { bonusDifficulty } from './bonus-difficulty';
 import type { BonusRunState } from './bonus';
@@ -33,7 +33,9 @@ import { smugglerLeg } from './smuggler';
 import { ActorWorld } from './world/actors';
 import { WorldInteractions } from './world/interactions';
 import type { Actor } from './combat/types';
-import { FlightInput, rotateLocally } from './input';
+import { FlightInput } from './input';
+import { moveShip } from './flight-motion';
+import { assistedAim } from './combat/aim';
 import { isControlScheme } from './input-layouts';
 import { createWarpRun, LEVEL_WARP_KEY, LevelWarpCode, WARP_BONUSES } from './level-warp';
 import { attackFaction, SAVE_KEY } from './logic';
@@ -41,7 +43,8 @@ import type { CargoDrop, CargoType, Faction } from './logic';
 import { updateWarpCueVisuals } from './models';
 import type { createArmadaRig } from './models';
 import { SoundBank } from './sound';
-import { button, GameUI } from './ui';
+import { GameUI } from './ui';
+import { button } from './menus/menu-shell';
 import { selectWeapon, weaponSpec } from './weapons';
 import type { WeaponCommand } from './weapons';
 
@@ -543,15 +546,8 @@ export class ArcadeGame {
     }
     tickStageTime(run, dt);
     this.previousPosition.copy(this.position);
-    if (this.definition.kind === 'armada' && (!run.cleared || run.mode === 'invaders')) {
-      this.position.x = THREE.MathUtils.clamp(this.position.x + look.x * 0.22 - look.roll * dt * 75, -ARMADA_LANE_LIMIT, ARMADA_LANE_LIMIT);
-      this.position.y = 0; this.position.z = 0; this.orientation.identity();
-    } else {
-      rotateLocally(this.orientation, look.x, look.y, look.roll, dt);
-      this.position.addScaledVector(this.forward(), look.speed * dt);
-      if (this.run.mode === 'endless' && !run.cleared && this.position.length() > 500) {
-        this.position.setLength(500); this.log('ARENA EDGE: TURN BACK TOWARD THE FIGHT');
-      }
+    if (moveShip(this.position, this.orientation, look, dt, { mode: run.mode, kind: this.definition.kind, cleared: run.cleared })) {
+      this.log('ARENA EDGE: TURN BACK TOWARD THE FIGHT');
     }
     this.updateCamera();
     if (this.warp > 0) {
@@ -666,16 +662,8 @@ export class ArcadeGame {
   private shoot(): void {
     if (this.shotDelay > 0 || this.run.phase !== 'playing') return;
     const spec = weaponSpec(this.run.family, this.run.tiers[this.run.family], this.run.mode);
-    const direction = this.forward();
-    if (this.profile.settings.aimAssist && this.definition.kind !== 'armada') {
-      // Assistance may bend a shot only toward a hostile within this narrow cone.
-      // Innocent traders and police must never become accidental assisted targets.
-      const targets = this.actors.filter(actor => !actor.dead && actor.faction === 'pirate' && actor.kind !== 'cargo')
-        .map(actor => ({ actor, delta: actor.object.position.clone().sub(this.position) }))
-        .filter(target => target.delta.length() < 500 && target.delta.angleTo(direction) < 0.035)
-        .sort((a, b) => a.delta.angleTo(direction) - b.delta.angleTo(direction));
-      if (targets[0]) direction.lerp(targets[0].delta.normalize(), 0.75).normalize();
-    }
+    const direction = assistedAim(this.position, this.forward(), this.actors,
+      this.profile.settings.aimAssist && this.definition.kind !== 'armada');
     let fired = 0;
     for (let index = 0; index < spec.count; index += 1) {
       const aim = direction.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0).applyQuaternion(this.orientation), (index - (spec.count - 1) / 2) * spec.spread);

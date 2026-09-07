@@ -35,7 +35,7 @@ for (const width of [1440, 390]) {
     await game.action('title'); await game.unlockWarp();
     for (const mode of ['invaders', 'smuggler'] as const) {
       await game.warpStage(mode === 'invaders' ? 1000 : 16, mode); await game.layout(); await game.engage();
-      await game.step(0.4); await game.move(15, 15); await game.layout();
+      await game.step(0.4); await game.layout();
       await page.screenshot({ path: game.info.outputPath(`${mode}-flight-${width}.png`) });
       await game.screenshot(`${mode}-flight-${width}`);
       await game.pause(); await game.action('levelWarp');

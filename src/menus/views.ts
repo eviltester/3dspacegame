@@ -10,7 +10,7 @@ import { BONUS_DIFFICULTY_LEVELS, bonusDifficulty } from '../bonus-difficulty';
 import { stageDefinition } from '../encounters';
 import type { StageDefinition } from '../encounters';
 import { WARP_BONUSES } from '../level-warp';
-import { button } from '../ui';
+import { button } from './menu-shell';
 import { FrontMenus } from './front';
 import { SmugglerMenus } from './smuggler';
 import { MODE_INFO } from '../modes';

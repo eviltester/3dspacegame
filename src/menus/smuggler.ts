@@ -2,7 +2,7 @@ import type { RunState } from '../arcade';
 import { smugglerLeg } from '../smuggler';
 import { flightControls } from '../input-layouts';
 import type { ControlScheme } from '../input-layouts';
-import { button } from '../ui';
+import { button } from './menu-shell';
 import type { MenuView } from './views';
 
 export class SmugglerMenus {

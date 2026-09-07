@@ -41,7 +41,7 @@ test('weapon rings are visible, animated and hollow on an actual WebGL canvas', 
 
 test('radar animates with flight and maximum combat load stays bounded and responsive', async ({ game, page }) => {
   await game.open(); await game.start();
-  const radar = await game.screenshot('radar-before', '#radar'); await game.move(200, 100); await game.step(0.2);
+  const radar = await game.screenshot('radar-before', '#radar'); await game.step(0.2);
   expect(radar.equals(await game.screenshot('radar-after', '#radar'))).toBe(false);
   await page.evaluate(() => window.vectorShooterDebug.maximumLoad());
   const start = await game.state(); expect(start.hostileCount).toBe(18); expect(start.shots.length).toBeGreaterThanOrEqual(220);

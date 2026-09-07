@@ -15,7 +15,6 @@ declare global {
 }
 
 export class GameDriver {
-  cursor = { x: 720, y: 450 };
   constructor(readonly page: Page, readonly info: TestInfo) {}
   async open(): Promise<void> {
     await this.page.goto('/');
@@ -34,10 +33,6 @@ export class GameDriver {
   step(seconds: number) { return this.page.evaluate(t => window.vectorShooterDebug.step(t), seconds); }
   async action(name: string): Promise<void> {
     const button = this.page.locator(`#screenContent [data-action="${name}"]`);
-    await button.scrollIntoViewIfNeeded();
-    const box = await button.boundingBox();
-    if (!box) throw new Error(`Missing action: ${name}`);
-    this.cursor = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     await button.click();
   }
   async engage(name = 'launch', requirePointerLock = true): Promise<void> {
@@ -69,10 +64,6 @@ export class GameDriver {
   async bonus(kind: BonusKind, difficulty = 1): Promise<void> {
     await this.page.locator('#warpDifficulty').selectOption(String(difficulty));
     await this.action(`warpBonus:${kind}`); await this.engage('bonusPlay');
-  }
-  async move(dx: number, dy: number): Promise<void> {
-    this.cursor.x += dx; this.cursor.y += dy;
-    await this.page.mouse.move(this.cursor.x, this.cursor.y);
   }
   async finish(): Promise<void> {
     // Deliberate shortcut for checkpoint/menu wiring tests, never mouse playthroughs.

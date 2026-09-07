@@ -97,8 +97,50 @@ function weaponInputFixture() {
     const event = Object.assign(new Event('keydown', { cancelable: true }), { code, repeat: false, ...extra });
     windowTarget.dispatchEvent(event); return event;
   };
-  return { input, mouse, key, pause, special, weapon, windowTarget, canvas };
+  return { input, mouse, key, pause, special, weapon, windowTarget, documentTarget, canvas };
 }
+
+it('accumulates relative motion rather than absolute cursor positions and consumes it once', async () => {
+  const { input, windowTarget } = weaponInputFixture(); await input.engage();
+  for (const [movementX, movementY] of [[15, -10], [-3, 4]]) {
+    windowTarget.dispatchEvent(Object.assign(new Event('mousemove'), { movementX, movementY, clientX: 700, clientY: 450 }));
+  }
+  expect(input.consume(0.1)).toMatchObject({ x: 12, y: -6 });
+  expect(input.consume(0.1)).toMatchObject({ x: 0, y: 0 });
+});
+
+it('ignores movement while inactive or unlocked and discards unconsumed motion across pause', async () => {
+  const { input, windowTarget, documentTarget, canvas } = weaponInputFixture();
+  const move = () => windowTarget.dispatchEvent(Object.assign(new Event('mousemove'), { movementX: 50, movementY: 20 }));
+  move(); expect(input.consume(1)).toMatchObject({ x: 0, y: 0 });
+  await input.engage(); documentTarget.pointerLockElement = null;
+  move(); expect(input.consume(1)).toMatchObject({ x: 0, y: 0 });
+  documentTarget.pointerLockElement = canvas;
+  move(); input.release(); move(); await input.engage();
+  expect(input.consume(1)).toMatchObject({ x: 0, y: 0 });
+});
+
+it('uses relative motion in the fallback only after pointer lock is rejected', async () => {
+  const { input, windowTarget, canvas } = weaponInputFixture();
+  vi.spyOn(canvas, 'requestPointerLock').mockRejectedValue(new Error('Lock unavailable'));
+  await input.engage();
+  windowTarget.dispatchEvent(Object.assign(new Event('mousemove'), { movementX: -30, movementY: 45 }));
+  expect(input.consume(1)).toMatchObject({ x: -30, y: 45 });
+});
+
+it.each(['blur', 'visibilitychange', 'pointerlockchange'])('requests pause on %s and clears input when the owner releases it', async type => {
+  const { input, mouse, pause, windowTarget, documentTarget } = weaponInputFixture();
+  pause.mockImplementation(() => input.release()); await input.engage(); mouse(true, 0);
+  windowTarget.dispatchEvent(Object.assign(new Event('mousemove'), { movementX: 50, movementY: 20 }));
+  if (type === 'blur') windowTarget.dispatchEvent(new Event(type));
+  else {
+    if (type === 'visibilitychange') documentTarget.hidden = true;
+    else documentTarget.pointerLockElement = null;
+    documentTarget.dispatchEvent(new Event(type));
+  }
+  expect(pause).toHaveBeenCalledOnce(); expect(input.active).toBe(false);
+  expect(input.consumeFire()).toBe(false); expect(input.consume(1)).toMatchObject({ x: 0, y: 0 });
+});
 
 it('switches once per active key press, consumes Tab, and keeps firing/throttle intact', async () => {
   const { input, key, mouse, weapon, special } = weaponInputFixture();

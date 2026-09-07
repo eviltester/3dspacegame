@@ -123,7 +123,7 @@ npm test
 ```
 
 - `npm test`: runs Vitest unit/integration tests, then the focused Playwright suite. No manually started server is needed.
-- `npm run test:unit`: source-adjacent unit tests of rules, controllers and view models; no application instance or Chromium.
+- `npm run test:unit`: source-adjacent tests of rules, controllers, view models and Testing Library DOM interactions; no application instance or Chromium.
 - `npm run test:integration`: four short checks that menu actions, lifecycle events and HUD updates are wired into the application.
 - `npm run test:e2e`: native controls, short play flows, responsive menus, audio and WebGL rendering.
 - `npm run test:e2e -- tests/e2e/controls.spec.ts`: run one browser suite.
@@ -146,6 +146,7 @@ Suite responsibilities and coverage boundaries are documented in [Testing](docs/
 Start with the [Code Guide](docs/code-guide.md) for a human-readable tour, the game-loop flow, save/reward rules, and a map of where to make changes. Comments in the source explain the less obvious decisions and ownership boundaries.
 
 - `game.ts`: fixed 60 Hz orchestration connecting controllers to input, world objects, audio and browser presentation.
+- `flight-motion.ts`, `combat/aim.ts`: relative flight/lane movement and hostile-only aim assistance, independent of browser input delivery.
 - `session/flight-lifecycle.ts`: damage, queued respawn, pause, protection and game-over timing.
 - `session/stage-flow.ts`, `session/encounter-outcome.ts`: objective requirements, opening salvage, once-only settlements and transition destinations.
 - `modes.ts`, `invaders.ts`, `smuggler.ts`, `scores.ts`: mode definitions, alien formations, delivery/life rules and per-mode score tables.
@@ -155,6 +156,7 @@ Start with the [Code Guide](docs/code-guide.md) for a human-readable tour, the g
 - `world/interactions.ts`: salvage magnets, trade, police dispatch/scans and solid-world collision.
 - `rendering/hud-model.ts`: pure state-to-HUD projection; `rendering/hud.ts` applies it to the DOM. `rendering/effects.ts` owns visual effects.
 - `menus/views.ts`, `menus/front.ts`, `menus/smuggler.ts`: menu content built from explicit run/profile inputs; `menus/mode-preview.ts` owns title simulations.
+- `menus/menu-shell.ts`: DOM-only menu actions, visibility and keyboard focus; `ui.ts` connects it to the vector previews.
 - `input-layouts.ts` and `menus/controls.ts`: shared, saved control bindings and their title/briefing labels.
 - `models/`: separate wireframe primitives, ship silhouettes, landmarks, projectiles and object catalog. `models.ts` exports the shared model API.
 - `input.ts`, `encounters.ts`, `weapons.ts`, `arcade.ts`, `bonus.ts` and `canyon.ts`: control, encounter, weapon, progression and bonus-course rules.

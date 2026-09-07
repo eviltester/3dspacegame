@@ -30,9 +30,9 @@ The browser calls `ArcadeGame.frame` through `requestAnimationFrame`. That callb
 For each simulation step:
 
 1. `FlightInput` provides accumulated mouse movement, held keys and one-shot actions. It clears consumed events so a click is not repeated accidentally.
-2. Exactly one movement system takes control: free flight, the armada lane, or a flight course. The bonus/course branch returns early, leaving the normal combat world inactive.
+2. Exactly one movement system takes control: `moveShip` handles free flight and the armada lane; a bonus/course controller owns its own flight path. The bonus/course branch returns early, leaving the normal combat world inactive.
 3. In normal combat, the encounter director releases scheduled fighters when there is space. Enemy AI moves actors, chooses faction-appropriate targets and advances attack warnings.
-4. Player fire and the projectile controller resolve combat. World interactions collect cargo, trade, scan for contraband and keep the player outside solid landmarks.
+4. `assistedAim` applies a narrow correction toward eligible hostiles before the projectile controller resolves combat. World interactions collect cargo, trade, scan for contraband and keep the player outside solid landmarks.
 5. Objective checks decide whether the stage is complete. Completion pays once, then starts recovery or activates the Warp Gate.
 
 `buildHud` projects the result into text, visibility, styles and radar contacts, normally at 20 updates per second. It takes its animation time explicitly and has no DOM or clock dependency. `HudController` only applies that model to the screen. Visual sparks and sounds respond to gameplay events; they are not damageable world actors.
@@ -86,6 +86,8 @@ In Smuggler Run the same courses are the main missions. Only reaching the exit b
 | Asteroids, splitting and ordered targets | `src/bonus.ts` |
 | Canyon path, moving gates, gunfire and exit wall | `src/canyon.ts` |
 | Mouse behaviour and pause safety | `src/input.ts` |
+| Local flight, reverse, arena bounds and armada movement | `src/flight-motion.ts` |
+| Hostile-only aim assistance and target priority | `src/combat/aim.ts` |
 | Keyboard bindings and control labels | `src/input-layouts.ts` |
 | Weapon speed, spread, cooldown, tiers and help | `src/weapons.ts` |
 | Projectile collisions and interceptions | `src/combat/projectiles.ts` |
@@ -101,7 +103,8 @@ In Smuggler Run the same courses are the main missions. Only reaching the exit b
 | Pickups, upgrades, lives, payouts and saves | `src/arcade.ts` |
 | Magnet movement, proximity trade and scans | `src/world/interactions.ts` |
 | High-score tables and deduplication | `src/scores.ts` |
-| Menus, preview behaviour and focus | `src/menus/` and `src/ui.ts` |
+| Menu actions, visibility and keyboard focus, without a renderer | `src/menus/menu-shell.ts` |
+| Vector preview rendering and the connection to menu DOM | `src/ui.ts` and `src/menus/mode-preview.ts` |
 | HUD text, indicators and visibility | `src/rendering/hud-model.ts` |
 | HUD DOM adapter, hit effects and radar | `src/rendering/` and `src/radar.ts` |
 | Five-second catalog cadence and browse position | `src/menus/object-scan.ts` |
