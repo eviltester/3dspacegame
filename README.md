@@ -1,6 +1,9 @@
 # 3D Vector Space Shooter
 
-An original, local-only 3D vector arcade shooter. Built with TypeScript, Vite and Three.js.
+A browser local-only 3D vector arcade shooter. Built with TypeScript, Vite and Three.js.
+
+Design: Alan Richardson
+Programming: Codex
 
 ## Play
 
