@@ -36,6 +36,8 @@ import type { Actor } from './combat/types';
 import { FlightInput } from './input';
 import { moveShip } from './flight-motion';
 import { assistedAim } from './combat/aim';
+import { WeaponFire } from './combat/weapon-fire';
+import { defensiveBlast } from './combat/defensive-blast';
 import { isControlScheme } from './input-layouts';
 import { createWarpRun, LEVEL_WARP_KEY, LevelWarpCode, WARP_BONUSES } from './level-warp';
 import { attackFaction, SAVE_KEY } from './logic';
@@ -114,7 +116,8 @@ export class ArcadeGame {
   // separate: opening Controls must not discard a paused course or recovery interval.
   private readonly flight = new FlightLifecycle();
   private nextId = 1;
-  private shotDelay = 0;
+  private readonly weaponFire = new WeaponFire();
+  private get shotDelay(): number { return this.weaponFire.remaining; }
   private readonly protection = new PlayerProtection();
   private recovery = 8;
   private warp = 0;
@@ -342,7 +345,7 @@ export class ArcadeGame {
     this.messages = []; this.feedbackTime = 0; this.popupTime = 0; this.hitTime = 0; this.arrivalTime = 0;
     this.world.visible = false; this.scene.add(this.bonus.root);
     this.camera.position.set(0, 0, 0); this.camera.quaternion.identity();
-    this.shotDelay = 0;
+    this.weaponFire.reset();
   }
   private disposeCourse(): void {
     if (this.bonus) { this.scene.remove(this.bonus.root); this.bonus.dispose(); this.bonus = null; }
@@ -482,7 +485,7 @@ export class ArcadeGame {
     this.position.set(0, 0, 0); this.previousPosition.copy(this.position); this.orientation.identity();
     this.input.throttle = this.definition.kind === 'armada' ? 0 : 65;
     this.warp = 0; this.worldInteractions.reset();
-    this.shotDelay = 0; this.rescued = false; this.objectiveShip = null; this.objectivePod = null;
+    this.weaponFire.reset(); this.rescued = false; this.objectiveShip = null; this.objectivePod = null;
     this.flight.paused = false; this.recovery = this.definition.difficulty.recovery; this.run.elapsed = 0;
     this.stats = { shots: 0, enemyShots: 0, kills: 0, interceptions: 0, npcHits: 0, pickups: 0, firstCombat: -1, firstUpgrade: -1, frames: 0, frameMs: 0 };
     if (this.run.mode === 'smuggler') { this.base = null; this.gate = null; this.updateCamera(); return; }
@@ -515,7 +518,7 @@ export class ArcadeGame {
     this.protection.display(this.flight.protection);
     const run = this.run;
     const look = this.input.consume(dt);
-    this.shotDelay = Math.max(0, this.shotDelay - dt);
+    this.weaponFire.tick(dt);
     this.feedbackTime = Math.max(0, this.feedbackTime - dt); this.hitTime = Math.max(0, this.hitTime - dt);
     this.popupTime = Math.max(0, this.popupTime - dt);
     this.arrivalTime = Math.max(0, this.arrivalTime - dt);
@@ -526,10 +529,12 @@ export class ArcadeGame {
       this.bonus.step(dt, look, this.camera);
       if (run.mode === 'smuggler') run.elapsed = this.bonus.state.elapsed;
       if (this.bonus.state.enemyShots > enemyShots) this.sound.enemyShoot('pirate', 100);
-      if (this.input.consumeFire() && this.shotDelay <= 0) {
-        this.shotDelay = weaponSpec(this.bonus.state.family, 1).cooldown; this.sound.shoot(this.bonus.state.family);
-        if (this.bonus.shoot(this.camera)) this.hitTime = 0.12;
-      }
+      if (this.input.consumeFire()) this.weaponFire.fire({ count: 1, cooldown: weaponSpec(this.bonus.state.family, 1).cooldown }, () => {
+        // BonusController emits the entire ray-tested volley, including misses.
+        this.sound.shoot(this.bonus!.state.family);
+        if (this.bonus!.shoot(this.camera)) this.hitTime = 0.12;
+        return true;
+      });
       if (this.bonus.state.points !== points) {
         const delta = this.bonus.state.points - points;
         if (this.bonus.state.fractures > fractures) this.sound.fracture(); else if (delta > 0) this.sound.pickup();
@@ -664,16 +669,15 @@ export class ArcadeGame {
     const spec = weaponSpec(this.run.family, this.run.tiers[this.run.family], this.run.mode);
     const direction = assistedAim(this.position, this.forward(), this.actors,
       this.profile.settings.aimAssist && this.definition.kind !== 'armada');
-    let fired = 0;
-    for (let index = 0; index < spec.count; index += 1) {
+    const fired = this.weaponFire.fire(spec, index => {
       const aim = direction.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0).applyQuaternion(this.orientation), (index - (spec.count - 1) / 2) * spec.spread);
       if (this.spawnShot('player', -1, 0, this.position.clone().addScaledVector(aim, 9), aim, spec.speed, spec.damage, spec.color, spec.radius, spec.length, spec.pierce)) {
-        fired++;
         if (this.run.mode === 'invaders') this.accuracy.begin(this.shots.at(-1)!.id, this.run.accuracy);
+        return true;
       }
-    }
+      return false;
+    });
     if (!fired) return;
-    this.shotDelay = spec.cooldown;
     this.stats.shots += 1;
     this.sound.shoot(this.run.family);
   }
@@ -779,13 +783,8 @@ export class ArcadeGame {
     }
     if (this.run.phase !== 'playing') return;
     if (this.run.charge < 100) { this.log(`BLAST CHARGING ${this.run.charge}%`); return; }
-    this.run.charge = 0;
-    // Clear dangerous fire and damage pirates only. The blast cannot hit an ally
-    // and create a warrant, even when police and traders are inside its radius.
-    this.projectiles.clearHostileFire(this.position);
-    for (const actor of [...this.actors]) {
-      if (!actor.dead && actor.faction === 'pirate' && actor.object.position.distanceTo(this.position) <= 240) this.damageActor(actor, 85, true);
-    }
+    if (!defensiveBlast(this.run, this.actors, this.position, () => this.projectiles.clearHostileFire(this.position),
+      (actor, amount) => this.damageActor(actor, amount, true))) return;
     this.effects.blast(this.position, this.orientation);
     this.sound.blast(); this.log('DEFENSIVE BLAST');
   }
@@ -816,8 +815,8 @@ export class ArcadeGame {
   }
   /**
    * Development-only test/inspection hooks, attached to window only in DEV builds.
-   * Fixture methods deliberately bypass player skill; mouse-pilot tests instead
-   * use real input and call step() only to advance the fixed simulation faster.
+   * Browser fixtures arrange renderable states explicitly; direct controller tests
+   * verify rules without going through this API or starting the application.
    */
   createDebugApi() {
     return {

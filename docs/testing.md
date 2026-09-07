@@ -1,6 +1,6 @@
 # Testing
 
-`npm test` runs three separate layers: unit tests, four adapter-wiring checks, and Chromium. `npm run check` runs lint, strict types, unit coverage, adapter checks and Chromium, once each. Playwright builds the production artifact before starting its isolated server on port 5180. The Pages test serves that artifact on port 5181; CI deploys it unchanged. The player's server and saves on port 5173 are never used.
+`npm test` runs three separate layers: unit tests, adapter-wiring checks, and Chromium. `npm run check` runs lint, strict types, unit coverage, adapter checks and Chromium, once each. Playwright builds the production artifact before starting its isolated server on port 5180. The Pages test serves that artifact on port 5181; CI deploys it unchanged. The player's server and saves on port 5173 are never used.
 
 Install the test browser once with `npx playwright install chromium`. Headless CI uses `npx playwright install --with-deps --only-shell chromium`.
 
@@ -21,6 +21,9 @@ Install the test browser once with `npx playwright install chromium`. Headless C
 | Guaranteed opening upgrade and reproducible salvage | `pirateSalvage` |
 | Pickup/repair/weapon state immediately reflected on HUD | `pickup` / `purchase` followed by pure `buildHud` |
 | Duplicate stage payments, resumed results, every bonus exit reason | `settleCourse`, save parsing and run settlement functions |
+| Weapon-family cooldowns, switching during cooldown, bolt counts and rejected spawns | `WeaponFire`, driven only by explicit simulation ticks |
+| Charged-blast spending and protected factions/range | `defensiveBlast` with actors and callback spies |
+| Secondary explosion fuses, burst callbacks and paused time | `ShipExplosions` with explicit update intervals |
 | Five-second catalog cadence, manual navigation and wrapping | `ObjectScan` |
 | Swept shots, piercing, interceptions and separate Spread hits/misses | `ProjectileSystem` and `ShotAccuracy` with vectors and callbacks |
 | Formation/AI pressure, attack limits, faction safety, salvage magnets and law | Individual enemy, encounter and world controllers |
@@ -39,9 +42,9 @@ Keep interaction sequences in these component tests. Happy DOM cannot establish 
 
 ## Adapter Checks
 
-`npm run test:integration` uses `vitest.integration.config.ts`, independently of the unit configuration. Its four short tests verify that application menu actions call the lifecycle controller, fatal hits consume the queued respawn, pickup values reach the DOM, and wave completion uses the correct destination.
+`npm run test:integration` uses `vitest.integration.config.ts`, independently of the unit configuration. Its short tests verify that menu actions call their controllers, pickups and selections reach the HUD, held fire survives respawn, kills pay before animation, practice saves remain isolated, and wave completion uses the correct destination.
 
-The Happy DOM fixture stubs WebGL drawing, canvas rasterization, audio startup and pointer-lock acquisition. It advances at most a few simulation ticks per case. It does not contribute to unit-test coverage.
+The Happy DOM fixture stubs WebGL drawing, canvas rasterization, audio startup and pointer-lock acquisition. It advances short, explicit simulation intervals without a running animation loop. It does not contribute to unit-test coverage.
 
 ## Coverage
 
@@ -57,19 +60,21 @@ Playwright is reserved for browser/device contracts and short input/rendering fl
 
 | Browser suite | Responsibility |
 | --- | --- |
-| `controls.spec.ts` | Native mouse fire/wheel, weapons, audio scheduling, pause and pointer-lock acquisition/release |
+| `controls.spec.ts` | One native mouse fire/wheel/pause and pointer-lock acquisition/release smoke |
+| `audio.spec.ts` | A genuine user gesture resumes Web Audio and schedules sounds, without playing a game |
 | `keyboard.spec.ts` | One native keyboard launch/flight/fire/pause check, including focus on Resume |
 | `deployment.spec.ts` | Production assets at the Pages path and absence of development debug controls |
 | `menus.spec.ts` | Catalog models rendered, mouse/keyboard navigation and five responsive widths |
 | `modes.spec.ts` | Animated previews, weapon help and per-mode score screens on desktop/mobile |
-| `combat.spec.ts` | Destruction/arrival audio, faction feedback, moving armada perspective and Warp indicator |
-| `invaders-combat.spec.ts` | Native weapon input and readable accuracy/cooldown HUD |
-| `progression.spec.ts` | Mouse shop/purchase/reload wiring, in-flight lives and zero-life continue |
-| `respawn.spec.ts` | Flashing blue craft pixels, responsive HUD and held fire/pointer-lock retention |
-| `bonuses.spec.ts` | Coloured moving asteroids, boost/blast, numbered target rendering and exit UI |
-| `rendering.spec.ts` | Hollow projectiles, explosions, radar motion and maximum-load performance |
+| `combat.spec.ts` | Moving armada perspective and Warp indicator |
+| `invaders-combat.spec.ts` | Actual CSS layout of the accuracy/cooldown HUD |
+| `respawn.spec.ts` | Blue protected-craft pixels, restoration of normal colours and responsive HUD |
+| `bonuses.spec.ts` | Isolated WebGL course geometry at explicit times: asteroid colours/motion, canyon and numbered markers |
+| `rendering.spec.ts` | Hollow projectiles, explosion pixels, radar motion and a maximum-load canvas; frame times are diagnostic |
 
-Browser console errors fail tests. Screenshots/traces are in `test-results/`, the HTML report is in `playwright-report/`, and timings are in `test-results/browser-results.json`. Pixel checks verify nonblank motion and relevant colours/transparency rather than fragile exact-image baselines. The load check requires median frame time below 50 ms with 18 hostiles, six attackers and 240 shots; it is a regression check on the test host, not a guarantee for every GPU.
+Browser console errors fail tests. Screenshots/traces are in `test-results/`, the HTML report is in `playwright-report/`, and timings are in `test-results/browser-results.json`. Pixel checks verify nonblank motion and relevant colours/transparency rather than fragile exact-image baselines. The load check records median/p95 frame times but does not pass or fail based on runner speed. Use its attachments to investigate performance on comparable hardware. Actor, attacker, projectile and debris caps remain hard assertions in direct controller tests.
+
+Rendering-only tests open a minimal HTML fixture and instantiate real models/controllers without the game loop, menus, pointer lock or saves. For application visuals, the fixture freezes the browser clock before loading the app. `step()` advances simulation explicitly and then requests one display frame; it is for arranging visuals, not measuring exact cooldowns. Native pause holds advance their timer explicitly. Only the production smoke and diagnostic frame-time sample run on wall-clock time.
 
 Browser fixtures use native clicks, wheel events and keys. They do not maintain a virtual cursor, calculate firing angles or infer relative pointer-lock movement from absolute viewport coordinates. Relative input translation, aiming and movement correctness are checked at their direct unit boundaries. The browser smoke proves lock acquisition/release and button/key delivery, not OS-specific physical mouse behaviour.
 

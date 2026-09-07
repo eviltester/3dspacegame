@@ -22,6 +22,7 @@ export default defineConfig({
         'src/menus/menu-shell.ts': { lines: 100, branches: 95, functions: 100 },
         'src/flight-motion.ts': { lines: 100, branches: 100, functions: 100 },
         'src/combat/aim.ts': { lines: 100, branches: 100, functions: 100 },
+        'src/combat/weapon-fire.ts': { lines: 100, branches: 100, functions: 100 },
         'src/{life-rewards,rendering/player-protection}.ts': { lines: 100, branches: 80, functions: 100 },
         'src/{arcade,bonus,canyon,encounters}.ts': { lines: 90, branches: 85, functions: 60 },
         'src/{modes,invaders,smuggler,scores}.ts': { lines: 95, branches: 85, functions: 95 },

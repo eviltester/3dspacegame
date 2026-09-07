@@ -3,6 +3,8 @@ import { createBoltModel, setProjectilePulseOpacity, disposeObject } from '../..
 import { weaponSpec } from '../../../src/weapons';
 import { createEnemyModel } from '../../../src/models/ships';
 import { ShipExplosions } from '../../../src/rendering/ship-explosions';
+import { BonusController } from '../../../src/bonus';
+import type { BonusKind } from '../../../src/arcade';
 
 export function projectilePreviews(): { family: string; bright: string; dim: string }[] {
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setSize(360, 260);
@@ -14,7 +16,20 @@ export function projectilePreviews(): { family: string; bright: string; dim: str
     const bright = renderer.domElement.toDataURL(); setProjectilePulseOpacity(model, 0); renderer.render(scene, camera);
     results.push({ family, bright, dim: renderer.domElement.toDataURL() }); scene.remove(model); disposeObject(model);
   }
-  renderer.dispose(); return results;
+  renderer.dispose(); renderer.forceContextLoss(); return results;
+}
+
+/** Render the real course geometry at two explicit times, without a running game. */
+export function coursePreview(kind: BonusKind, width: number, height: number): string[] {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setSize(width, height);
+  const course = new BonusController(kind, 42, 8), scene = new THREE.Scene(); scene.add(course.root);
+  const camera = new THREE.PerspectiveCamera(72, width / height, 0.1, 4000);
+  const frames: string[] = [];
+  for (const dt of [0, 0.12]) {
+    course.step(dt, { x: 0, y: 0 }, camera);
+    renderer.render(scene, camera); frames.push(renderer.domElement.toDataURL());
+  }
+  course.dispose(); renderer.dispose(); renderer.forceContextLoss(); return frames;
 }
 
 export function explosionPreview(width: number, height: number) {
@@ -24,10 +39,10 @@ export function explosionPreview(width: number, height: number) {
   const effects = new ShipExplosions(world);
   const capture = () => { renderer.render(scene, camera); return renderer.domElement.toDataURL(); };
   const intact = capture(); effects.explode(ship); world.remove(ship); disposeObject(ship);
-  const frames = [{ name: 'intact', image: intact, ...effects.snapshot }];
+  const frames = [{ name: 'intact', image: intact }];
   for (const [name, steps] of [['separating', 18], ['detonating', 34], ['showers', 23], ['finished', 40]] as const) {
     for (let i = 0; i < steps; i++) effects.update(1 / 60);
-    frames.push({ name, image: capture(), ...effects.snapshot });
+    frames.push({ name, image: capture() });
   }
   effects.clear(); renderer.dispose(); renderer.forceContextLoss(); return frames;
 }

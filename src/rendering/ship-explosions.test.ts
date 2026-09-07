@@ -57,6 +57,20 @@ it('clears all resources and pending sounds when leaving a stage', () => {
   resources.forEach(dispose => expect(dispose).toHaveBeenCalledOnce()); disposeObject(ship);
 });
 
+it('does not advance fuse timers or secondary sound callbacks while simulation is paused', () => {
+  vi.useFakeTimers();
+  try {
+    const world = new THREE.Group(), onBurst = vi.fn(), effects = new ShipExplosions(world, onBurst), ship = createPirateModel();
+    effects.explode(ship); effects.update(0.3);
+    const snapshot = effects.snapshot, positions = world.children.map(object => object.position.toArray());
+    vi.advanceTimersByTime(30000);
+    expect(effects.snapshot).toEqual(snapshot); expect(world.children.map(object => object.position.toArray())).toEqual(positions);
+    expect(onBurst).not.toHaveBeenCalled();
+    effects.update(0.5); expect(onBurst).toHaveBeenCalled();
+    expect(effects.snapshot.bursts).toBeGreaterThan(0); effects.clear(); disposeObject(ship);
+  } finally { vi.useRealTimers(); }
+});
+
 it('is independent of gameplay randomness, IDs and source-model disposal', () => {
   const rng = new Random(123), world = new THREE.Group(), world2 = new THREE.Group();
   const first = new EffectsSystem(world, () => rng), second = new EffectsSystem(world2, () => rng);

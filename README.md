@@ -124,7 +124,7 @@ npm test
 
 - `npm test`: runs Vitest unit/integration tests, then the focused Playwright suite. No manually started server is needed.
 - `npm run test:unit`: source-adjacent tests of rules, controllers, view models and Testing Library DOM interactions; no application instance or Chromium.
-- `npm run test:integration`: four short checks that menu actions, lifecycle events and HUD updates are wired into the application.
+- `npm run test:integration`: short checks that menu actions, lifecycle events and HUD updates are wired into the application.
 - `npm run test:e2e`: native controls, short play flows, responsive menus, audio and WebGL rendering.
 - `npm run test:e2e -- tests/e2e/controls.spec.ts`: run one browser suite.
 - `npm run test:e2e:ui`: interactive Playwright test explorer.
@@ -150,6 +150,7 @@ Start with the [Code Guide](docs/code-guide.md) for a human-readable tour, the g
 - `session/flight-lifecycle.ts`: damage, queued respawn, pause, protection and game-over timing.
 - `session/stage-flow.ts`, `session/encounter-outcome.ts`: objective requirements, opening salvage, once-only settlements and transition destinations.
 - `modes.ts`, `invaders.ts`, `smuggler.ts`, `scores.ts`: mode definitions, alien formations, delivery/life rules and per-mode score tables.
+- `combat/weapon-fire.ts`, `combat/defensive-blast.ts`: ship-wide cooldowns, volley emission and faction-safe charged blasts.
 - `combat/projectiles.ts`: projectile ownership, swept contacts, interceptions and faction collision rules.
 - `combat/enemies.ts`: enemy movement, targeting, warnings and attack cadence.
 - `world/actors.ts`: actor lifecycle, original encounter formations and level population.
@@ -161,7 +162,7 @@ Start with the [Code Guide](docs/code-guide.md) for a human-readable tour, the g
 - `models/`: separate wireframe primitives, ship silhouettes, landmarks, projectiles and object catalog. `models.ts` exports the shared model API.
 - `input.ts`, `encounters.ts`, `weapons.ts`, `arcade.ts`, `bonus.ts` and `canyon.ts`: control, encounter, weapon, progression and bonus-course rules.
 - `tests/e2e/fixtures/`: browser driver and pixel fixtures. Debug controls are exposed only in development builds.
-- `tests/integration/`: four adapter-wiring checks with a DOM/device harness, run separately from unit tests and their coverage.
+- `tests/integration/`: short adapter-wiring checks with a DOM/device harness, run separately from unit tests and their coverage.
 
 All ship outlines, formations, canyon paths, vector lettering and sound phrases are procedural original assets. No film, television or commercial game artwork, names, music or recreated levels are included. Three.js provides geometry, curves and rendering. Broad arcade mechanics are inspirations, not copied expressive assets.
 

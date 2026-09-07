@@ -1,5 +1,5 @@
 /**
- * Four short application-wiring checks. Only device APIs are stubbed; game
+ * Short application-wiring checks. Only device APIs are stubbed; game
  * decisions are covered separately by source-adjacent unit tests.
  */
 import { afterEach, beforeEach, expect, vi } from 'vitest';

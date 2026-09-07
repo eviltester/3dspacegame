@@ -16,22 +16,6 @@ test('Ships & Objects renders every model with keyboard and mouse navigation', a
   }
 });
 
-test('hidden warp code exposes 99 Journey stages, arbitrary Attack Challenge waves and eight bonus difficulties without touching saves', async ({ game, page }) => {
-  await game.open(); await game.start(); await game.pause(); await game.action('title');
-  const saved = await page.evaluate(() => localStorage.getItem('vector-shooter-save-v2'));
-  for (const key of ['ArrowUp', 'ArrowDown', 'b', 'a']) await page.keyboard.press(key);
-  await expect(page.locator('#levelWarpButton')).toHaveCount(0);
-  await game.unlockWarp();
-  await expect(page.locator('#warpStage option')).toHaveCount(99); await expect(page.locator('#warpDifficulty option')).toHaveCount(8);
-  await game.warpStage(99); expect((await game.state()).stage).toBe(99); expect((await game.state()).practice).toBe(true);
-  await game.action('levelWarp'); await page.locator('#warpWave').fill('0'); await game.action('warpEndless');
-  expect((await game.state()).menu).toBe('levelWarp');
-  await game.warpStage(1000, 'endless'); await game.engage(); await game.pause(); await game.action('title');
-  expect(await page.evaluate(() => localStorage.getItem('vector-shooter-save-v2'))).toBe(saved);
-  await page.reload(); await expect(page.locator('#levelWarpButton')).toBeVisible();
-  expect(await page.evaluate(() => window.testAudio.samples.length)).toBe(0);
-});
-
 for (const width of [1440, 1024, 650, 390, 320]) {
   test(`menus and HUD fit ${width}px without overlapping`, async ({ game, page }) => {
     await page.setViewportSize({ width, height: width > 650 ? 900 : 844 }); await game.open();

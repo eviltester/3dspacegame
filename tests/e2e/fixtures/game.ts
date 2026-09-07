@@ -15,13 +15,24 @@ declare global {
 }
 
 export class GameDriver {
+  private manualClock = false;
   constructor(readonly page: Page, readonly info: TestInfo) {}
-  async open(): Promise<void> {
+  async open(options: { live?: boolean } = {}): Promise<void> {
+    if (!options.live) {
+      // Freeze before the app starts: browser RPC/screenshot time must not play
+      // the game. Tests advance the simulation and display frames explicitly.
+      await this.page.clock.install({ time: new Date('2030-01-01T00:00:00Z') });
+      await this.page.clock.pauseAt(new Date('2030-01-01T00:01:00Z'));
+      this.manualClock = true;
+    }
     await this.page.goto('/');
     await expect(this.page.locator('#launchTitle')).toHaveText('3D VECTOR SPACE SHOOTER');
     await expect(this.page).toHaveTitle('3D Vector Space Shooter');
-    await this.page.waitForFunction(() => !!window.vectorShooterDebug);
+    await expect.poll(() => this.page.evaluate(() => !!window.vectorShooterDebug)).toBe(true);
+    await this.renderFrame();
   }
+  openRenderer(): Promise<unknown> { return this.page.goto('/tests/e2e/fixtures/rendering.html'); }
+  private async renderFrame(): Promise<void> { if (this.manualClock) await this.page.clock.runFor(17); }
   state() { return this.page.evaluate(() => window.vectorShooterDebug.getState()); }
   async mouse(down: boolean, button = 0): Promise<void> {
     const options = { button: (['left', 'middle', 'right'] as const)[button] };
@@ -30,10 +41,14 @@ export class GameDriver {
   wheel(delta: number) { return this.page.mouse.wheel(0, delta); }
   // Advance actual fixed-step gameplay without waiting wall-clock seconds. This
   // does not grant resources, hit targets or bypass collision/mission rules.
-  step(seconds: number) { return this.page.evaluate(t => window.vectorShooterDebug.step(t), seconds); }
+  async step(seconds: number): Promise<void> {
+    await this.page.evaluate(t => window.vectorShooterDebug.step(t), seconds);
+    await this.renderFrame();
+  }
   async action(name: string): Promise<void> {
     const button = this.page.locator(`#screenContent [data-action="${name}"]`);
     await button.click();
+    await this.renderFrame();
   }
   async engage(name = 'launch', requirePointerLock = true): Promise<void> {
     await this.action(name);
@@ -47,6 +62,7 @@ export class GameDriver {
   }
   async pause(): Promise<void> {
     await this.page.mouse.down({ button: 'middle' });
+    if (this.manualClock) await this.page.clock.runFor(600);
     await expect.poll(async () => (await this.state()).menu).toBe('pause');
     await this.page.mouse.up({ button: 'middle' });
   }
@@ -75,6 +91,7 @@ export class GameDriver {
   async screenshot(name: string, selector = '#viewport canvas'): Promise<Buffer> {
     // Assert visible canvas pixels rather than a brittle exact screenshot match.
     // Individual rendering tests compare frames to also check motion/transparency.
+    await this.renderFrame();
     const buffer = await this.page.locator(selector).screenshot();
     await this.info.attach(name, { body: buffer, contentType: 'image/png' });
     const png = PNG.sync.read(buffer);

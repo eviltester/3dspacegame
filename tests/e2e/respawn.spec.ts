@@ -3,7 +3,7 @@ import { test, expect } from './fixtures/game';
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test(`flashing blue respawn craft and HUD fit ${viewport.width}px`, async ({ game, page }) => {
-    await page.clock.install(); await page.setViewportSize(viewport); await game.open(); await game.start('invaders');
+    await page.setViewportSize(viewport); await game.open(); await game.start('invaders');
     await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath()); await game.step(0.02); await page.clock.runFor(20);
     await game.layout();
     const pixels = PNG.sync.read(await game.screenshot('blue-respawn-craft'));
@@ -25,13 +25,3 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     expect(normalBlue).toBeLessThan(blue);
   });
 }
-
-test('held mouse fire continues through an automatic respawn', async ({ game, page }) => {
-  await game.open(); await game.start('invaders'); await page.mouse.down(); await game.step(0.05);
-  const shots = (await game.state()).stats.shots;
-  await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath()); await game.step(0.8);
-  await page.mouse.up();
-  expect((await game.state()).stats.shots).toBeGreaterThan(shots);
-  expect((await game.state()).menu).toBe(''); expect((await game.state()).lives).toBe(2);
-  expect(await page.evaluate(() => document.pointerLockElement === document.querySelector('#viewport canvas'))).toBe(true);
-});

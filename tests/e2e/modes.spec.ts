@@ -6,7 +6,7 @@ test.use({ trace: { mode: 'retain-on-failure', screenshots: false, snapshots: fa
 for (const width of [1440, 390]) {
   test(`four live title previews, weapon help and separate score screens fit ${width}px`, async ({ game, page }) => {
     await page.setViewportSize({ width, height: width > 650 ? 900 : 844 });
-    await page.clock.install(); await game.open();
+    await game.open();
     const saved = await page.evaluate(() => localStorage.getItem('vector-shooter-save-v2'));
     for (const mode of GAME_MODES) {
       await game.action(`mode:${mode}`); await game.layout();
