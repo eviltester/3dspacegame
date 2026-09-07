@@ -53,7 +53,8 @@ for (const scheme of ['wasd', 'arrows'] as const) {
     for (const lives of [2, 1, 0]) {
       await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath());
       expect((await game.state()).lives).toBe(lives);
-      await keyAction(page, 'relaunch'); await expect.poll(async () => (await game.state()).menu).toBe('');
+      if (lives === 0) await keyAction(page, 'relaunch'); else await game.step(0.02);
+      await expect.poll(async () => (await game.state()).menu).toBe('');
     }
     expect((await game.state()).lives).toBe(3); expect((await game.state()).continued).toBe(true);
     await page.keyboard.press('Escape'); await keyAction(page, 'title');

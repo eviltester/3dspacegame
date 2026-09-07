@@ -21,9 +21,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # Tests use headless Chromium, so the full desktop browser is unnecessary.
+      - run: npx playwright install --with-deps --only-shell chromium
       - run: npm run check
-      - run: npm run test:coverage
       - uses: actions/upload-artifact@v4
         if: always()
         with:

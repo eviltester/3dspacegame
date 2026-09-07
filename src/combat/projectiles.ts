@@ -13,6 +13,8 @@ export interface ProjectileCallbacks {
   intercepted(position: THREE.Vector3): void;
   npcHit(): void;
   stopped(): boolean;
+  playerContact?(shot: Shot): void;
+  playerExpired?(shot: Shot): void;
 }
 export function canProjectileHit(shot: Shot, actor: Actor): boolean {
   // Deliberate player fire can hit peaceful ships; the game applies the legal
@@ -81,11 +83,13 @@ export class ProjectileSystem {
       if (expired.has(shot)) continue;
       if (intercepted) {
         if (expired.has(intercepted)) continue;
+        callbacks.playerContact?.(shot);
         expired.add(intercepted); expired.add(shot); callbacks.intercepted(intercepted.object.position);
       } else if (actor) {
         if (actor.dead || shot.hit.has(actor.id)) continue;
         // A piercing bolt may overlap a ship for several ticks but can damage it once.
         shot.hit.add(actor.id); shot.pierce--;
+        if (shot.faction === 'player') callbacks.playerContact?.(shot);
         callbacks.damageActor(actor, shot.damage, shot.faction === 'player');
         if (shot.faction !== 'player') callbacks.npcHit();
         if (shot.pierce <= 0) expired.add(shot);
@@ -97,6 +101,7 @@ export class ProjectileSystem {
     this.active = this.active.filter(shot => {
       // Removing a Three.js object does not release its GPU allocations; dispose too.
       if (!expired.has(shot)) return true;
+      if (shot.faction === 'player') callbacks.playerExpired?.(shot);
       this.world.remove(shot.object); disposeObject(shot.object); return false;
     });
   }

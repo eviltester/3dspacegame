@@ -23,5 +23,15 @@ export default [
       'eqeqeq': 'error'
     }
   },
+  {
+    files: ['src/**/*.test.ts'],
+    rules: {
+      // A unit regression should arrange component state, not boot the application.
+      'no-restricted-imports': ['error', { patterns: [{
+        group: ['**/game', '**/game.ts', '**/tests/integration/**', '@playwright/*', 'playwright', 'playwright/*'],
+        message: 'Unit-test the responsible controller directly. Application/browser wiring belongs in its separate test suite.'
+      }] }]
+    }
+  },
   { files: ['**/*.mjs'], languageOptions: { globals: globals.node } }
 ];

@@ -14,7 +14,8 @@ import { button } from '../ui';
 import { FrontMenus } from './front';
 import { SmugglerMenus } from './smuggler';
 import { MODE_INFO } from '../modes';
-import { WEAPON_HELP } from '../weapons';
+import { WEAPON_HELP, weaponSpec } from '../weapons';
+import { INVADER_MISS_COST } from '../combat/accuracy';
 import { CONTROL_LAYOUTS } from '../input-layouts';
 import type { ControlScheme } from '../input-layouts';
 
@@ -49,6 +50,7 @@ export class MenuViews {
     return ['briefing', definition.title.replace(/\d+/g, '').trim(), `${MODE_INFO[run.mode].name} / ${MODE_INFO[run.mode].unit} ${run.stage}${run.mode === 'journey' ? ` / ${JOURNEY_STAGE_COUNT}` : ''}`, `
       <section class="mission-briefing"><p class="briefing-status">MISSION BRIEFING</p><h2 id="missionBriefTitle">${definition.title}</h2><p id="missionBriefObjective">${objective}</p><p id="missionBriefCaution">${caution}</p><p id="missionBriefReward">REWARD CR ${200 + Math.min(20, run.stage) * 35 + (run.stage === 1 ? 150 : 0)}</p></section>
       <p class="menu-description">TIME BONUS: ${formatStageTime(run)} remaining. ${TIME_BONUS_RATE} CR per whole second left ${run.mode === 'invaders' || (run.mode === 'endless' && run.stage % 5 !== 0) ? 'when the next wave starts' : 'at the Warp Gate'}. Zero ends the bonus, not the mission.</p>
+      ${run.mode === 'invaders' ? `<p class="menu-description">Every missed bolt costs ${INVADER_MISS_COST} points. Spread fires three separately scored bolts; alien hits and interceptions count toward wave accuracy. Aliens take firing turns and recover faster as waves advance.</p><p class="menu-description">Extra life every 20,000 points, up to five lives. Collect repair cells for +30 hull and +30 shield. Weapon cores upgrade your equipped weapon. Respawn shields last three seconds.</p><p class="run-loadout">COOLDOWNS: ${FAMILIES.map(f => `${f.toUpperCase()} ${weaponSpec(f, run.tiers[f], run.mode).cooldown.toFixed(2)}s`).join(' / ')}</p>` : ''}
       <p class="run-loadout">${run.lives} LIVES / ${run.family.toUpperCase()} ${run.tiers[run.family]} / ${definition.waves.length} ${run.mode === 'invaders' ? 'ALIEN' : 'PIRATE'} FLIGHTS</p>
       <div class="menu-actions">${button('launch', 'START MISSION', 'id="launchButton"')}${warpBackButton(run)}${button('title', 'TITLE SCREEN')}</div>`];
   }
@@ -62,16 +64,16 @@ export class MenuViews {
       <p class="briefing-status">EQUIP WEAPON</p><div class="family-select">${FAMILIES.map(f => button(`equip:${f}`, `${f.toUpperCase()} ${run.tiers[f]}`, `aria-pressed="${run.family === f}"`)).join('')}</div>
       <p class="weapon-purpose">${WEAPON_HELP[run.family]}</p>
       ${run.timeBonus !== null ? `<p class="briefing-status" id="dockTimeBonus">TIME BONUS BANKED +CR ${run.timeBonus}</p>` : ''}
-      <div class="shop-list">${rows}</div><div class="menu-actions">${button('depart', run.mode === 'invaders' ? 'NEXT WAVE' : 'NEXT STAGE', 'id="launchButton"')}${warpBackButton(run)}${button('title', run.practice ? 'TITLE SCREEN' : 'SAVE AND TITLE')}</div>`];
+      <div class="shop-list">${rows}</div><div class="menu-actions">${button('depart', 'NEXT STAGE', 'id="launchButton"')}${warpBackButton(run)}${button('title', run.practice ? 'TITLE SCREEN' : 'SAVE AND TITLE')}</div>`];
   }
   static bonusOffer(run: RunState, kind: BonusKind, scheme: ControlScheme = 'mouse'): MenuView {
     const difficulty = bonusDifficulty(run.mode, run.stage);
     return ['bonusOffer', BONUS_NAMES[kind], `OPTIONAL BONUS / DIFFICULTY ${difficulty}`, `<p class="mission-copy">${bonusBrief(kind, difficulty, scheme)}</p><p class="safe-bonus">Your main ship, cargo, equipment and lives stay safe. Finish, fail or skip: the journey continues.</p><div class="menu-actions">${button('bonusPlay', 'PLAY BONUS', 'id="launchButton"')}${button('bonusSkip', 'SKIP TO DOCK')}${warpBackButton(run)}</div>`];
   }
   static gameOver(run: RunState): MenuView {
-    return ['gameover', 'GAME OVER', run.lives ? `${run.lives} LIVES REMAINING` : 'CONTINUE FROM CHECKPOINT / SCORE RESETS', `
+    return ['gameover', 'GAME OVER', 'CONTINUE FROM CHECKPOINT / SCORE RESETS', `
       <div id="deathCountdown" class="death-countdown"><span>RETURN TO TITLE IN</span><strong id="deathTimer">10</strong></div>
-      <div class="menu-actions">${button('relaunch', run.lives ? 'RELAUNCH NOW' : 'CONTINUE', 'id="launchButton"')}${warpBackButton(run)}${button('title', 'TITLE SCREEN')}</div>`];
+      <div class="menu-actions">${button('relaunch', 'CONTINUE', 'id="launchButton"')}${warpBackButton(run)}${button('title', 'TITLE SCREEN')}</div>`];
   }
   static victory(run: RunState): MenuView {
     return ['victory', 'JOURNEY COMPLETE', run.continued ? 'CONTINUED FLIGHT' : 'ARCADE JOURNEY', `<p class="result-score">${run.pilot.score} POINTS</p><p>All ${JOURNEY_STAGE_COUNT} stages cleared.</p><div class="menu-actions">${button('title', 'TITLE SCREEN', 'id="launchButton"')}</div>`];

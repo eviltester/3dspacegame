@@ -24,20 +24,11 @@ export class GameDriver {
     await this.page.waitForFunction(() => !!window.vectorShooterDebug);
   }
   state() { return this.page.evaluate(() => window.vectorShooterDebug.getState()); }
-  asteroidFlight() {
-    return this.page.evaluate(() => {
-      const state = window.vectorShooterDebug.getState();
-      return { bonus: state.bonus, view: state.view, flight: state.bonusAsteroids };
-    });
+  async mouse(down: boolean, button = 0): Promise<void> {
+    const options = { button: (['left', 'middle', 'right'] as const)[button] };
+    if (down) await this.page.mouse.down(options); else await this.page.mouse.up(options);
   }
-  canyonFlight() {
-    return this.page.evaluate(() => {
-      const state = window.vectorShooterDebug.getState(), course = state.bonusCourse;
-      return { bonus: state.bonus, view: state.view, course: course && {
-        gates: course.gates, shots: course.shots, speed: course.speed, fired: course.fired, passed: course.passed, offset: course.offset
-      } };
-    });
-  }
+  wheel(delta: number) { return this.page.mouse.wheel(0, delta); }
   // Advance actual fixed-step gameplay without waiting wall-clock seconds. This
   // does not grant resources, hit targets or bypass collision/mission rules.
   step(seconds: number) { return this.page.evaluate(t => window.vectorShooterDebug.step(t), seconds); }

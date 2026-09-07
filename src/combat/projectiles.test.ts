@@ -4,10 +4,12 @@ import { actorFixture } from '../testing/actors';
 import type { Actor, Shot } from './types';
 import { canProjectileHit, MAX_PROJECTILES, ProjectileSystem } from './projectiles';
 import type { ProjectileCallbacks } from './projectiles';
+import { ShotAccuracy, emptyAccuracy, accuracyPercent } from './accuracy';
 
 function fixture() {
   const world = new THREE.Group(), system = new ProjectileSystem(world);
-  const callbacks = { damageActor: vi.fn<ProjectileCallbacks['damageActor']>(), damagePlayer: vi.fn<ProjectileCallbacks['damagePlayer']>(), intercepted: vi.fn(), npcHit: vi.fn(), stopped: () => false };
+  const callbacks = { damageActor: vi.fn<ProjectileCallbacks['damageActor']>(), damagePlayer: vi.fn<ProjectileCallbacks['damagePlayer']>(), intercepted: vi.fn(), npcHit: vi.fn(), stopped: () => false,
+    playerContact: vi.fn<(shot: Shot) => void>(), playerExpired: vi.fn<(shot: Shot) => void>() };
   const player = new THREE.Vector3(0, 0, 20);
   const spawn = (faction: Shot['faction'] = 'player', z = 0, direction = 1, pierce = 1, target = 0) => {
     system.spawn(faction, -1, target, new THREE.Vector3(0, 0, z), new THREE.Vector3(0, 0, direction), 100, 12, 0xffffff, 1, 10, pierce, 'pulse');
@@ -25,6 +27,7 @@ describe('projectile simulation', () => {
     tick(0.25);
     expect(callbacks.intercepted).toHaveBeenCalledOnce(); expect(callbacks.damagePlayer).not.toHaveBeenCalled();
     expect(system.shots).toHaveLength(0);
+    expect(callbacks.playerContact).toHaveBeenCalledOnce(); expect(callbacks.playerExpired).toHaveBeenCalledOnce();
   });
   it('resolves nearest contacts first, even with reversed actor storage order', () => {
     const { spawn, tick, callbacks, target } = fixture();
@@ -83,6 +86,28 @@ describe('projectile simulation', () => {
     expect(callbacks.damagePlayer).toHaveBeenCalledExactlyOnceWith(12, expect.stringContaining('RED PIRATE'));
     spawn('police', 0, 1, 1, 10); tick(0.1, [target(10, 5)]);
     expect(callbacks.npcHit).toHaveBeenCalledOnce();
+  });
+  it('settles actual Spread bolts independently, charging only the two that miss', () => {
+    const { system, callbacks, tick, target } = fixture();
+    const tracker = new ShotAccuracy(), stats = emptyAccuracy(); let penalty = 0;
+    callbacks.playerContact.mockImplementation(shot => tracker.hit(shot.id, stats));
+    callbacks.playerExpired.mockImplementation(shot => { penalty += tracker.end(shot.id, stats); });
+    for (const x of [-20, 0, 20]) {
+      system.spawn('player', -1, 0, new THREE.Vector3(x, 0, 0), new THREE.Vector3(0, 0, 1), 100, 12, 0xffffff, 1, 10, 1, 'spread');
+      tracker.begin(system.shots.at(-1)!.id, stats);
+    }
+    const alien = target(10, 50); alien.radius = 2;
+    tick(0.5, [alien]); tick(1);
+    expect(callbacks.damageActor).toHaveBeenCalledOnce();
+    expect(stats).toEqual({ shots: 3, hits: 1, misses: 2 }); expect(accuracyPercent(stats)).toBe(33); expect(penalty).toBe(10);
+    system.clear(); tick(); expect(penalty).toBe(10);
+  });
+  it('does not report clears as natural misses or report NPC shots in player accuracy', () => {
+    const { spawn, system, callbacks, tick } = fixture();
+    spawn(); system.clear(); tick(2);
+    expect(callbacks.playerExpired).not.toHaveBeenCalled();
+    spawn('police', 0, 1, 1, 10); tick(4);
+    expect(callbacks.playerContact).not.toHaveBeenCalled(); expect(callbacks.playerExpired).not.toHaveBeenCalled();
   });
 });
 

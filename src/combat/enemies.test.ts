@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { newRun } from '../arcade';
+import type { GameMode } from '../arcade';
+import { invaderFireTiming } from './invader-fire';
 import { stageDefinition } from '../encounters';
 import { ENEMY_ATTACK_WARNING } from '../endless-difficulty';
 import { actorFixture } from '../testing/actors';
@@ -8,10 +10,11 @@ import { EnemySystem } from './enemies';
 import type { EnemyFrame, EnemyServices } from './enemies';
 import type { Actor } from './types';
 
-function fixture(wave = 1) {
+function fixture(wave = 1, mode: GameMode = 'endless') {
   const actors: Actor[] = [];
-  const frame: EnemyFrame = { run: newRun('endless', 1), definition: stageDefinition('endless', wave), actors: () => actors,
+  const frame: EnemyFrame = { run: newRun(mode, 1), definition: stageDefinition(mode, wave), actors: () => actors,
     position: new THREE.Vector3(), previousPosition: new THREE.Vector3(), orientation: new THREE.Quaternion(), objectiveShip: null };
+  frame.run.stage = wave;
   const add = (overrides: Partial<Actor> = {}, x = 0, z = -180) => {
     const actor = actorFixture({ id: actors.length + 10, ...overrides });
     actor.object.position.set(x, 0, z); actor.previous.copy(actor.object.position); actor.anchor.copy(actor.object.position);
@@ -99,5 +102,38 @@ describe('NPC salvage', () => {
     const { add, tick, services } = fixture();
     add({ kind, faction: kind }); add({ kind: 'cargo', faction: 'neutral', essential: true, drop: { type: 'rescuePod', amount: 1 } }); tick();
     expect(services.removeActor).not.toHaveBeenCalled();
+  });
+});
+
+describe('Invaders attack scheduling', () => {
+  function simulate(wave: number, count: number) {
+    const f = fixture(wave, 'invaders');
+    const shots: Array<{ source: number; time: number }> = [];
+    f.services.spawnShot.mockImplementation((_faction, source) => { shots.push({ source, time: f.frame.run.elapsed }); });
+    for (let i = 0; i < count; i++) f.add({ cooldown: 1.1 + i * 0.25 }, (i % 6 - 2.5) * 22, -165 - Math.floor(i / 6) * 60);
+    let warned = 0;
+    for (let tick = 0; tick < 1800; tick++) {
+      f.tick(); warned = Math.max(warned, f.actors.filter(a => a.windup >= 0).length);
+    }
+    return { ...f, shots, warned };
+  }
+  it.each([1, 12, 1000])('staggered wave %i never fires two aliens together and gives each one a recovery', wave => {
+    const { shots, warned, frame } = simulate(wave, 18);
+    const turns = shots.filter((shot, i) => i === 0 || shot.source !== shots[i - 1].source || shot.time !== shots[i - 1].time);
+    const timing = invaderFireTiming(wave);
+    expect(turns.length).toBeGreaterThan(10);
+    expect(turns[0].time).toBeGreaterThanOrEqual(1.1 + ENEMY_ATTACK_WARNING - 1 / 60);
+    expect(warned).toBeLessThanOrEqual(frame.definition.attackerCap);
+    const last = new Map<number, number>();
+    for (let i = 0; i < turns.length; i++) {
+      const shot = turns[i];
+      if (i) expect(shot.time - turns[i - 1].time).toBeGreaterThanOrEqual(timing.gap - 1 / 60);
+      if (last.has(shot.source)) expect(shot.time - last.get(shot.source)!).toBeGreaterThanOrEqual(timing.cooldown + ENEMY_ATTACK_WARNING - 1 / 60);
+      last.set(shot.source, shot.time);
+    }
+    expect(last.size).toBeGreaterThanOrEqual(8);
+  });
+  it('increases actual fire with wave progression without synchronizing the formation', () => {
+    expect(simulate(12, 8).shots.length).toBeGreaterThan(simulate(1, 8).shots.length);
   });
 });

@@ -8,6 +8,7 @@ import { createCatalog, disposeObject } from './models';
 import { drawVectorTitle } from './vector-title';
 import { ModePreview } from './menus/mode-preview';
 import { MODE_INFO } from './modes';
+import { ObjectScan } from './menus/object-scan';
 import type { GameMode } from './modes';
 
 export const button = (action: string, label: string, extra = '') => `<button type="button" data-action="${action}" ${extra}>${label}</button>`;
@@ -20,8 +21,7 @@ export class GameUI {
   readonly previewCamera = new THREE.PerspectiveCamera(48, 1, 0.1, 500);
   readonly catalog = createCatalog();
   private previewObject: THREE.Object3D | null = null;
-  private scan = 0;
-  private scanTime = 0;
+  private readonly scan = new ObjectScan(this.catalog.length);
   private title = '3D VECTOR SPACE SHOOTER';
   private screen = 'title';
   private demo: ModePreview | null = null;
@@ -44,7 +44,7 @@ export class GameUI {
           <div class="arcade-strip"><span id="livesReadout"></span><span id="chainReadout"></span><span id="chargeReadout"></span></div>
         </div>
         <div class="flight-buttons">${button('pause', '||', 'id="pauseButton" aria-label="Pause" title="Pause (Esc or hold wheel click)"')}${button('exitBonus', 'EXIT BONUS', 'id="bonusExitButton" hidden')}${button('nextWave', 'NEXT WAVE', 'id="nextWaveButton" hidden')}</div>
-        <div id="damageLayer" class="damage-layer"></div><div id="warpLayer" class="warp-layer"></div>
+        <div id="damageLayer" class="damage-layer"></div><div id="protectionLayer" class="protection-layer" hidden></div><div id="warpLayer" class="warp-layer"></div>
         <div id="launchOverlay" class="launch-overlay">
           <div class="arcade-menu">
             <header class="arcade-header"><div class="arcade-scores"><span>1UP <strong id="arcadeScore">000000</strong></span><span>HI SCORE <strong id="arcadeBest">000000</strong></span></div><h1 id="launchTitle" class="screen-reader-only">3D VECTOR SPACE SHOOTER</h1><canvas id="vectorTitle" class="vector-title" aria-hidden="true"></canvas><p id="briefingStatus" class="briefing-status"></p></header>
@@ -128,10 +128,9 @@ export class GameUI {
   private changeScan(direction: number): void {
     // Manual navigation wraps and restarts the full five-second reading window.
     // Models are fresh instances: rotating or disposing one cannot affect a ship.
-    this.scan = (this.scan + direction + this.catalog.length) % this.catalog.length;
-    this.scanTime = 0;
+    this.scan.move(direction);
     if (this.previewObject) { this.previewScene.remove(this.previewObject); disposeObject(this.previewObject); }
-    const item = this.catalog[this.scan];
+    const item = this.catalog[this.scan.index];
     this.previewObject = item.create();
     this.previewObject.scale.setScalar(item.scale);
     this.previewObject.rotation.set(0.35, -0.5, 0);
@@ -139,14 +138,13 @@ export class GameUI {
     this.previewCamera.position.z = item.cameraZ;
     this.text('modelTitle', item.title);
     this.text('modelDescription', item.description);
-    this.text('modelCount', `${this.scan + 1}/${this.catalog.length}`);
+    this.text('modelCount', this.scan.label);
   }
   tick(dt: number): void {
     if (this.overlay.hidden || document.hidden) return;
     if (this.screen === 'title' && this.demo) { this.demo.tick(dt); this.preview.render(this.demo.scene, this.demo.camera); return; }
     if (!['objects', 'briefing'].includes(this.screen)) return;
-    this.scanTime += dt;
-    if (this.scanTime >= 5) this.changeScan(1);
+    if (this.scan.tick(dt)) this.changeScan(0);
     if (this.previewObject) this.previewObject.rotation.y += dt * 0.55;
     this.preview.render(this.previewScene, this.previewCamera);
   }

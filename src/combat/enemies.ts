@@ -12,6 +12,7 @@ import { invaderPosition } from '../invaders';
 import type { Faction } from '../logic';
 import { createEnemyModel, edgesFromGeometry } from '../models';
 import type { Actor, ActorKind } from './types';
+import { InvaderFireDirector, invaderFireTiming } from './invader-fire';
 
 export interface EnemyFrame {
   run: RunState;
@@ -36,7 +37,10 @@ export interface EnemyServices {
 export class EnemySystem {
   private frame!: EnemyFrame;
   private threat: Actor | null = null;
+  private readonly invaderFire = new InvaderFireDirector();
+  private invaderTurn: Actor | undefined;
   constructor(private readonly services: EnemyServices) {}
+  reset(): void { this.invaderFire.reset(); this.invaderTurn = undefined; }
   private hostiles(): readonly Actor[] { return this.frame.actors().filter(a => !a.dead && (a.kind === 'pirate' || a.kind === 'mine')); }
   private forward(): THREE.Vector3 { return new THREE.Vector3(0, 0, -1).applyQuaternion(this.frame.orientation); }
   update(dt: number, frame: EnemyFrame): Actor | null {
@@ -46,6 +50,9 @@ export class EnemySystem {
     // Take a snapshot: carriers can add fighters and mines during this iteration.
     // New arrivals start updating on the next tick instead of acting immediately.
     const actors = [...this.frame.actors()];
+    this.invaderTurn = frame.run.mode === 'invaders' ? this.invaderFire.next(dt, actors.filter(actor => !actor.dead
+      && actor.kind === 'pirate' && actor.windup < 0 && actor.cooldown <= dt && actor.age >= 1.1
+      && actor.object.position.distanceTo(frame.position) <= 390)) : undefined;
     for (const actor of actors) {
       if (actor.dead || ['cargo', 'gate', 'planet', 'market'].includes(actor.kind)) continue;
       actor.previous.copy(actor.object.position);
@@ -153,6 +160,10 @@ export class EnemySystem {
       // ship fires at once, and arrivals must finish their initial grace period.
       const attackers = this.frame.actors().filter(item => item.windup >= 0 && !item.dead).length;
       if (attackers >= this.frame.definition.attackerCap) return;
+      if (this.frame.run.mode === 'invaders' && pirate) {
+        if (actor !== this.invaderTurn) return;
+        this.invaderFire.started(actor, this.frame.run.stage);
+      }
       actor.windup = ENEMY_ATTACK_WARNING;
     }
     if (actor.windup >= 0) {
@@ -163,6 +174,7 @@ export class EnemySystem {
         actor.windup = -1;
         actor.cooldown = (actor.role === 'carrier' ? 1.4 : actor.role === 'gunship' ? 2.5 : 1.7) / this.frame.definition.speedScale;
         if (pirate) actor.cooldown *= difficulty.cooldownScale;
+        if (pirate && this.frame.run.mode === 'invaders') actor.cooldown = invaderFireTiming(this.frame.run.stage).cooldown;
         if (actor.essential && actor.role === 'carrier' && actor.hull < actor.maxHull * 0.5) actor.cooldown *= 0.7;
         const aimPoint = point.clone();
         if (aimsAtPlayer && this.frame.definition.kind !== 'armada') {

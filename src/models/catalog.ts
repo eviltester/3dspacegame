@@ -31,9 +31,9 @@ export function createCatalog(): CatalogItem[] {
   const cargo: Array<[CargoType, string]> = [
     ['credits', 'Cash salvage. Spent at supply stops during this run.'], ['legalCargo', 'Sell automatically at a lawful station.'],
     ['rareMineral', 'Valuable salvage. Lawful stations buy it.'], ['contraband', 'Deliberate pickup only. Sell at the magenta black market; lawful scans can seize it.'],
-    ['weaponCore', 'Improves the equipped weapon; capped cores convert to credits.'], ['shieldCell', 'Restores 30 shield points.'], ['rescuePod', 'Protected mission cargo. Deliver to the station.']
+    ['weaponCore', 'Improves the equipped weapon; capped cores award points in Invaders or credits in trading modes.'], ['shieldCell', 'Repairs 30 hull points and restores 30 shield points. Collect it during combat.'], ['rescuePod', 'Protected mission cargo. Deliver to the station.']
   ];
-  for (const [kind, description] of cargo) items.push({ title: kind.replace(/([A-Z])/g, ' $1').toUpperCase(), description, create: () => createCargoModel(kind), scale: 3.4, cameraZ: 62 });
+  for (const [kind, description] of cargo) items.push({ title: kind === 'shieldCell' ? 'REPAIR CELL' : kind.replace(/([A-Z])/g, ' $1').toUpperCase(), description, create: () => createCargoModel(kind), scale: 3.4, cameraZ: 62 });
   items.push(
     { title: 'SUPPLY STATION', description: 'Sell legal cargo here. Mission completion opens the upgrade dock.', create: createBaseModel, scale: 0.45, cameraZ: 86 },
     { title: 'OUTPOST PLANET', description: 'Solid landmark. Canyon bonus sorties use a loan skiff near the surface.', create: () => createPlanetModel(0x6fffbc), scale: 0.44, cameraZ: 96 },

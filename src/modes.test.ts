@@ -75,7 +75,7 @@ describe('Invaders progression and patterns', () => {
     const run = newRun('invaders', 123); run.cleared = true; run.phase = 'recovery';
     const content = MenuViews.briefing(run, stageDefinition('invaders', 1))[3];
     expect(content).toContain('ship stays in the defensive lane'); expect(content).not.toContain('tractor beam is released');
-    expect(MenuViews.shop(run)[3]).toContain('NEXT WAVE');
+    expect(content).toContain('Extra life every 20,000 points');
   });
   it('has only armadas, no bonus detours, fixed fighter health and increasing pressure', () => {
     for (let wave = 1; wave <= 100; wave++) {

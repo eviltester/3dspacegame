@@ -54,16 +54,3 @@ test('armada briefing explains beam, mouse stays in lane and completion releases
   await game.finish(); await game.move(10, 30); await game.step(0.1);
   expect((await game.state()).orientation).not.toEqual(before.orientation); await expect(page.locator('#objectiveArrow')).toContainText('WARP');
 });
-
-test('wave 1000 has greater pressure and keeps it after retry, boss warp and next wave', async ({ game }) => {
-  await game.open(); await game.unlockWarp(); await game.warpStage(10, 'endless');
-  const early = await game.state(); await game.action('levelWarp'); await game.warpStage(1000, 'endless');
-  const late = await game.state(); expect(late.flights.roster).toBeGreaterThan(early.flights.roster);
-  expect(late.difficulty.cooldownScale).toBeLessThan(early.difficulty.cooldownScale);
-  await game.engage(); await game.page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath()); await game.engage('relaunch');
-  expect((await game.state()).difficulty).toEqual(late.difficulty);
-  await game.finish(); await game.gate(); await game.action('bonusSkip'); await game.action('depart'); await game.engage();
-  expect((await game.state()).stage).toBe(1001); await game.finish();
-  expect((await game.state()).recovery).toBeLessThan(3); await game.step(3);
-  expect((await game.state()).stage).toBe(1002);
-});

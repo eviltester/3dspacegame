@@ -35,7 +35,7 @@ For each simulation step:
 4. Player fire and the projectile controller resolve combat. World interactions collect cargo, trade, scan for contraband and keep the player outside solid landmarks.
 5. Objective checks decide whether the stage is complete. Completion pays once, then starts recovery or activates the Warp Gate.
 
-The HUD reads the result, normally at 20 updates per second. It does not decide whether a reward has been earned. Visual sparks and sounds respond to gameplay events; they are not damageable world actors.
+`buildHud` projects the result into text, visibility, styles and radar contacts, normally at 20 updates per second. It takes its animation time explicitly and has no DOM or clock dependency. `HudController` only applies that model to the screen. Visual sparks and sounds respond to gameplay events; they are not damageable world actors.
 
 ## Coordinates And Collisions
 
@@ -53,7 +53,11 @@ Course weapons currently use an immediate ray test with separate visual bolts. T
 
 `RunState` holds current equipment and a separate deep copy of the resources available at the start of the stage. A retry restores that copy. Lives and continued status are outside it so restoring equipment cannot undo a death.
 
-`loseLife` spends a life and restores resources. `retry` alone does not spend one. Continuing at zero lives grants three lives and clears both the current and checkpoint score; otherwise the next retry could restore pre-continue points.
+`FlightLifecycle` owns damage acceptance, pause and life-transition decisions. It uses `loseCombatLife` to preserve an ongoing fight, or `loseLife` to roll back a failed objective. It returns a queued respawn, consumed once at the next simulation step after collision callbacks finish. Its three-second protection timer is authoritative; the renderer reads that timer to colour the ship. Only zero lives opens a game-over menu. The controller also owns its countdown. Continuing grants three lives and clears both current and checkpoint score; otherwise a checkpoint restart could restore pre-continue points.
+
+`encounterComplete` takes only objective state: remaining hostiles/flights, rescue delivery and protected-ship status. `completeEncounter` settles a completed stage and returns either recovery or gate travel. `afterGate`, `nextStage`, `resumeDestination` and `settleCourse` own the subsequent destinations and once-only payments. `ArcadeGame` displays those results; it does not duplicate their rules. These contracts can be exercised by arranging state in a unit test, without constructing a scene or advancing a whole game.
+
+`awardScoreLives` consumes score milestones stored outside the retry resources: 20,000 points in Invaders and 5,000 banked points in Smuggler Run. Consuming milestones at the five-life cap, and never rewinding them after penalties or retries, prevents repeated awards.
 
 Completing a stage marks `cleared` before further completion calls can award anything again. Time bonuses distinguish `null` (not paid) from `0` (paid with no time remaining). Bonus offers likewise track available, entered, settled and skipped states. These markers prevent repeated callbacks or resumed screens from paying twice.
 
@@ -86,12 +90,21 @@ In Smuggler Run the same courses are the main missions. Only reaching the exit b
 | Weapon speed, spread, cooldown, tiers and help | `src/weapons.ts` |
 | Projectile collisions and interceptions | `src/combat/projectiles.ts` |
 | Enemy movement, warnings and faction targets | `src/combat/enemies.ts` |
+| Invaders firing turns and cooldowns | `src/combat/invader-fire.ts` |
+| Per-bolt wave accuracy and miss penalties | `src/combat/accuracy.ts` |
+| Score-based extra lives and thresholds | `src/life-rewards.ts` |
+| Damage, life loss, pause, protection duration and countdown | `src/session/flight-lifecycle.ts` |
+| Objective requirements and guaranteed salvage | `src/session/encounter-outcome.ts` |
+| Stage destinations, course settlement and resume routing | `src/session/stage-flow.ts` |
+| Blue shield flash and colour restoration | `src/rendering/player-protection.ts` |
 | Cargo prices and faction-law rules | `src/logic.ts` |
 | Pickups, upgrades, lives, payouts and saves | `src/arcade.ts` |
 | Magnet movement, proximity trade and scans | `src/world/interactions.ts` |
 | High-score tables and deduplication | `src/scores.ts` |
 | Menus, preview behaviour and focus | `src/menus/` and `src/ui.ts` |
-| HUD, hit effects and radar | `src/rendering/` and `src/radar.ts` |
+| HUD text, indicators and visibility | `src/rendering/hud-model.ts` |
+| HUD DOM adapter, hit effects and radar | `src/rendering/` and `src/radar.ts` |
+| Five-second catalog cadence and browse position | `src/menus/object-scan.ts` |
 | Spinning hull breakup and secondary particle showers | `src/rendering/ship-panels.ts` and `src/rendering/ship-explosions.ts` |
 | Original ship/pickup outlines and guide entries | `src/models/` |
 | Single-stroke title lettering | `src/vector-title.ts` |
@@ -111,10 +124,10 @@ Shared cargo and faction-law rules live in `logic.ts`. Run progression, weapon-f
 
 ## Tests As Examples
 
-Source-adjacent `*.test.ts` files test rules and real controllers with explicit state, time and vectors. Playwright's `tests/e2e/*.spec.ts` files test the browser integration: inputs, screens, audio scheduling, rendered pixels and progression.
+Source-adjacent `*.test.ts` files test rules, controllers and view models with explicit state, time and vectors. They do not instantiate `ArcadeGame`. `tests/integration/wiring.test.ts` contains four short adapter checks in Happy DOM, stubbing device calls only. Playwright's `tests/e2e/*.spec.ts` files verify native inputs, CSS layout, audio scheduling and rendered pixels through short flows.
 
-The shared `GameDriver` provides both ordinary UI actions and clearly named shortcuts for arranging an edge case. `MousePilot` reads state to aim but uses actual input and combat, with the clock accelerated. A 99-checkpoint fixture traversal is useful coverage, but is not a claim that a human has fought all 99 stages.
+For example, test fatal damage by calling `FlightLifecycle.damage` and `consumeRespawn`; test pickup display by applying `pickup` and inspecting `buildHud`; test a stage-99 destination by passing that stage's run to `completeEncounter` and `afterGate`. Course-path tests construct only their course controller. These are explicit component contracts, not automated playthroughs.
 
-Run `npm run test:unit` for quick feedback, `npm test` for unit and browser tests, or `npm run check` for lint, types, both suites and a production build. See [Testing](testing.md) for suite responsibilities and coverage limits.
+Run `npm run test:unit` for unit feedback, `npm run test:integration` for adapter wiring, `npm test` for all three layers, or `npm run check` for lint, types, unit-only coverage and the browser-tested production build. See [Testing](testing.md) for suite responsibilities and coverage limits.
 
 Keep comments focused on intent, units, ownership, ordering and surprising rules. When behaviour changes, update the explanation and its regression test together. Comments should help a reader reason about the code, not merely repeat each statement in English.

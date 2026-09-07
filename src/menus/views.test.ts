@@ -25,9 +25,10 @@ describe('menu views', () => {
     settleStage(run);
     expect(MenuViews.briefing(run, definition)[3]).toContain('beam is released');
   });
-  it('keeps relaunch active throughout the countdown and changes to Continue at zero lives', () => {
+  it('keeps Continue active throughout the zero-life countdown', () => {
     const run = newRun('journey', 1);
-    const content = MenuViews.gameOver(run)[3]; expect(content).toContain('RELAUNCH NOW'); expect(content).not.toContain('disabled');
+    run.lives = 0;
+    const content = MenuViews.gameOver(run)[3]; expect(content).toContain('CONTINUE'); expect(content).not.toContain('disabled');
     expect(content).toContain('id="deathTimer">10'); expect(content).not.toContain('System resetting');
     run.lives = 0; expect(MenuViews.gameOver(run)[3]).toContain('CONTINUE');
   });

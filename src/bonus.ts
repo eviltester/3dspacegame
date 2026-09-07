@@ -80,6 +80,7 @@ export class BonusController {
   private rockColorIndex = 0;
   private exitAnnounced = false;
   private collisionDelay = 0;
+  protect(seconds: number): void { this.collisionDelay = Math.max(this.collisionDelay, seconds); }
   private blastEffect: { object: THREE.LineSegments; life: number; direction: THREE.Vector3 } | null = null;
   private bolts: Array<{ object: THREE.Object3D; direction: THREE.Vector3; speed: number; life: number }> = [];
   private previous = new THREE.Vector3();

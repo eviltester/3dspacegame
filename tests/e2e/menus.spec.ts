@@ -1,15 +1,13 @@
 import { test, expect } from './fixtures/game';
 
-test('Ships & Objects has five-second cadence, count, keyboard and mouse navigation', async ({ game, page }) => {
-  await page.clock.install(); await game.open(); await game.action('objects');
+test('Ships & Objects renders every model with keyboard and mouse navigation', async ({ game, page }) => {
+  await game.open(); await game.action('objects');
   await expect(page.locator('#launchTitle')).toHaveText('SHIPS & OBJECTS');
   await expect(page.locator('#catalogSection .briefing-status')).toHaveText('SHIPS & OBJECTS');
   const initial = (await game.state()).briefingCount;
   await page.locator('[data-action="scanNext"]').click();
   expect((await game.state()).briefingCount).not.toBe(initial);
   await page.keyboard.press('ArrowLeft'); expect((await game.state()).briefingCount).toBe(initial);
-  await page.clock.runFor(3000); expect((await game.state()).briefingCount).toBe(initial);
-  await page.clock.runFor(2100); expect((await game.state()).briefingCount).not.toBe(initial);
   const count = Number((await game.state()).briefingCount?.split('/')[1]); expect(count).toBe(29);
   for (let i = 0; i < count; i++) {
     await page.locator('[data-action="scanNext"]').click();

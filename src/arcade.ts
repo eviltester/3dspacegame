@@ -12,6 +12,9 @@ import { GAME_MODES, SMUGGLER_EXTRA_LIFE_SCORE } from './modes';
 import type { GameMode } from './modes';
 import { emptyScoreboards, parseScoreboards, recordScore } from './scores';
 import type { Scoreboards } from './scores';
+import { emptyAccuracy, parseAccuracy } from './combat/accuracy';
+import type { WaveAccuracy } from './combat/accuracy';
+import { lifeScoreInterval } from './life-rewards';
 
 export type { GameMode } from './modes';
 export type WeaponFamily = 'pulse' | 'spread' | 'lance';
@@ -30,10 +33,12 @@ export interface RunResources {
 export interface RunState extends RunResources {
   /** Identifies the whole run across retries/resumes, not one particular stage. */
   id: string;
-  /** Next banked-score threshold that can grant a Smuggler life. */
+  /** Next score milestone; kept outside retryable resources to prevent repeat awards. */
   nextLifeScore: number;
   /** Last delivered haul, retained so a resumed result screen can show it again. */
   stageReward: number;
+  /** Per-wave projectile results, retained on cleared checkpoints. */
+  accuracy: WaveAccuracy;
   practice?: boolean;
   mode: GameMode;
   seed: number;
@@ -80,9 +85,9 @@ export const resources = (run: RunResources): RunResources => clone({ pilot: run
 
 export function newRun(mode: GameMode, seed: number, family: WeaponFamily = 'pulse'): RunState {
   const base: RunResources = { pilot: createInitialProgress(), family, tiers: { pulse: 1, spread: 1, lance: 1 }, magnet: 20, charge: 0 };
-  return { ...base, mode, id: `${mode}-${seed}`, nextLifeScore: SMUGGLER_EXTRA_LIFE_SCORE, stageReward: 0, seed: seed >>> 0, stage: 1, lives: 3, continued: false, phase: 'briefing', checkpoint: resources(base),
+  return { ...base, mode, id: `${mode}-${seed}`, nextLifeScore: lifeScoreInterval(mode), stageReward: 0, seed: seed >>> 0, stage: 1, lives: 3, continued: false, phase: 'briefing', checkpoint: resources(base),
     cleared: false, bonusStatus: 'available', chain: { kills: 0, multiplier: 1, remaining: 0, recent: [] }, elapsed: 0,
-    timeRemaining: STAGE_TIME_LIMIT, timeBonus: null, kills: 0, earlyCore: false };
+    timeRemaining: STAGE_TIME_LIMIT, timeBonus: null, kills: 0, earlyCore: false, accuracy: emptyAccuracy() };
 }
 
 export function timeBonusSeconds(run: Pick<RunState, 'timeRemaining'>): number {
@@ -138,6 +143,7 @@ export function pickup(run: RunState, drop: CargoDrop): void {
   if (drop.type === 'weaponCore') {
     const max = run.stage >= (run.mode === 'journey' ? 5 : 8) ? 3 : 2;
     if (run.tiers[run.family] < max) run.tiers[run.family] += 1;
+    else if (run.mode === 'invaders') run.pilot.score += 200;
     else run.pilot.credits += 200;
     run.pilot.score += 40;
     run.pilot.weaponLevel = run.tiers[run.family];
@@ -175,6 +181,7 @@ export function settleBonus(run: RunState, ratio: number, targetScore?: number):
   return { medal, credits, score, extraLife };
 }
 export function dock(run: RunState): void {
+  if (run.mode === 'invaders') return;
   run.pilot = instantTrade(run.pilot, 'lawful').progress;
   run.phase = 'shop';
 }
@@ -184,6 +191,7 @@ export function purchasePrice(run: RunState, kind: Purchase): number {
 }
 /** The shop and purchase operation share this check so displayed eligibility is real. */
 export function purchaseBlocked(run: RunState, kind: Purchase): string | null {
+  if (run.mode === 'invaders') return 'Upgrades are collected in flight';
   if (run.phase !== 'shop') return 'Dock first';
   if (kind === 'tier' && run.tiers[run.family] >= 3) return 'Maximum tier';
   if (kind === 'tier' && run.tiers[run.family] === 2 && run.stage < (run.mode === 'journey' ? 5 : 8)) return `Tier 3 opens after ${run.mode === 'journey' ? 'stage 5' : 'wave 8'}`;
@@ -211,13 +219,14 @@ export function retry(run: RunState, useContinue = false): void {
     run.continued = true;
     run.pilot.score = 0;
     run.checkpoint.pilot.score = 0;
-    run.nextLifeScore = SMUGGLER_EXTRA_LIFE_SCORE;
+    run.nextLifeScore = lifeScoreInterval(run.mode);
   }
   run.cleared = false;
   run.elapsed = 0;
   run.timeRemaining = STAGE_TIME_LIMIT;
   run.timeBonus = null;
   run.kills = 0;
+  run.accuracy = emptyAccuracy();
   run.earlyCore = false;
   run.stageReward = 0;
   run.bonusStatus = 'available';
@@ -229,6 +238,14 @@ export function loseLife(run: RunState): void {
   retry(run);
   run.phase = 'gameover';
 }
+/** A destroyed combat ship respawns into its current fight while lives remain. */
+export function loseCombatLife(run: RunState): void {
+  if (run.lives <= 1) { loseLife(run); return; }
+  run.lives--;
+  run.pilot.hull = 100;
+  run.pilot.shield = run.pilot.maxShield;
+  resetChain(run);
+}
 export function advance(run: RunState): void {
   if (!run.cleared) return;
   if (run.mode === 'journey' && run.stage >= JOURNEY_STAGE_COUNT) { run.phase = 'victory'; return; }
@@ -239,11 +256,12 @@ export function advance(run: RunState): void {
   run.timeRemaining = STAGE_TIME_LIMIT;
   run.timeBonus = null;
   run.kills = 0;
+  run.accuracy = emptyAccuracy();
   run.earlyCore = false;
   run.stageReward = 0;
   run.bonusStatus = 'available';
   run.pilot.wanted = createInitialProgress().wanted;
-  run.pilot.shield = Math.min(run.pilot.maxShield, run.pilot.shield + 25);
+  if (run.mode !== 'invaders') run.pilot.shield = Math.min(run.pilot.maxShield, run.pilot.shield + 25);
   // Bank the finished stage, purchases and optional rewards as the next retry baseline.
   run.checkpoint = resources(run);
 }
@@ -300,8 +318,13 @@ export function parseProfile(raw: string | null, legacy: string | null): Profile
     for (const mode of GAME_MODES) {
       const run = parsed.checkpoints?.[mode];
       if (validCheckpoint(run, mode)) {
+        run.accuracy = parseAccuracy(run.accuracy);
         if (typeof run.id !== 'string') run.id = `${mode}-legacy-${run.seed}`;
-        if (run.nextLifeScore === undefined) run.nextLifeScore = (Math.floor(run.pilot.score / SMUGGLER_EXTRA_LIFE_SCORE) + 1) * SMUGGLER_EXTRA_LIFE_SCORE;
+        const lifeInterval = lifeScoreInterval(mode);
+        if (run.nextLifeScore === undefined) run.nextLifeScore = (Math.floor(run.pilot.score / lifeInterval) + 1) * lifeInterval;
+        // Align stored milestones to the mode's interval without repeating an award.
+        if (run.nextLifeScore % lifeInterval !== 0) run.nextLifeScore = Math.max(Math.ceil(run.nextLifeScore / lifeInterval), Math.floor(run.pilot.score / lifeInterval) + 1) * lifeInterval;
+        if (mode === 'invaders' && run.cleared && run.phase === 'shop') run.phase = 'recovery';
         if (run.stageReward === undefined) run.stageReward = 0;
         // Default missing clocks without paying for already-completed gate travel.
         if (run.timeRemaining === undefined) run.timeRemaining = Math.max(0, STAGE_TIME_LIMIT - (Number.isFinite(run.elapsed) ? Math.max(0, run.elapsed) : 0));

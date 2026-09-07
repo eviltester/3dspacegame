@@ -13,20 +13,21 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 5_000 },
   outputDir: 'test-results',
-  reporter: [['list'], ['html', { open: 'never' }]],
+  reporter: [['list'], ['html', { open: 'never' }], ['json', { outputFile: 'test-results/browser-results.json' }]],
   use: {
     browserName: 'chromium',
     baseURL: 'http://127.0.0.1:5180',
     viewport: { width: 1440, height: 900 },
     actionTimeout: 5_000,
-    // Retain useful failures without capturing an image for every mouse-pilot step.
+    // Keep useful failure evidence without capturing images for every input event.
     trace: { mode: 'retain-on-failure', screenshots: false, snapshots: true, sources: true },
     screenshot: 'only-on-failure'
   },
   webServer: {
-    // Never reuse the player's port 5173 server or silently attach to a stale build.
-    // The production-path smoke test separately owns port 5181.
-    command: 'npm run dev -- --port 5180 --strictPort',
+    // Always build once before starting: the Pages smoke test serves this exact
+    // artifact on 5181 and CI deploys it unchanged after all checks succeed.
+    // Never reuse the player's port 5173 server or attach to a stale build.
+    command: 'npm run build && npm run dev -- --port 5180 --strictPort',
     url: 'http://127.0.0.1:5180',
     reuseExistingServer: false,
     timeout: 30_000

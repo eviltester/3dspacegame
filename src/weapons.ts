@@ -2,6 +2,8 @@
 import * as THREE from 'three';
 import type { WeaponFamily } from './arcade';
 import { FAMILIES } from './arcade';
+import type { GameMode } from './modes';
+import { INVADER_WEAPON_COOLDOWN } from './combat/invader-fire';
 
 export type WeaponCommand = WeaponFamily | 'next';
 export const WEAPON_HELP: Record<WeaponFamily, string> = {
@@ -21,11 +23,12 @@ const BASE: Record<WeaponFamily, WeaponSpec> = {
   spread: { damage: 18, cooldown: 0.34, speed: 380, spread: 0.078, count: 3, pierce: 1, color: 0xffbf48, radius: 3.4, length: 12 },
   lance: { damage: 85, cooldown: 0.65, speed: 650, spread: 0, count: 1, pierce: 3, color: 0x75eaff, radius: 2.7, length: 32 }
 };
-export function weaponSpec(family: WeaponFamily, tier: number): WeaponSpec {
+export function weaponSpec(family: WeaponFamily, tier: number, mode?: GameMode): WeaponSpec {
   // Copy rather than mutate BASE so upgrading one family cannot affect a later run.
   const level = Math.max(1, Math.min(3, tier));
   const spec = BASE[family];
-  return { ...spec, damage: spec.damage * (1 + (level - 1) * 0.25), cooldown: spec.cooldown * (1 - (level - 1) * 0.08) };
+  const cooldown = mode === 'invaders' ? INVADER_WEAPON_COOLDOWN[family] : spec.cooldown;
+  return { ...spec, damage: spec.damage * (1 + (level - 1) * 0.25), cooldown: cooldown * (1 - (level - 1) * 0.08) };
 }
 
 // Work in relative coordinates so two fast-moving objects cannot tunnel through one another.

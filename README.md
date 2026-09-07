@@ -48,11 +48,15 @@ Later Attack Challenge carriers have finite escort flights as well as their own 
 
 Enemy hull and damage stay fixed. Fighters acquire three-shot fans at wave 75, and heavy ships five-shot fans at wave 150. The 0.8-second attack warning and initial spawn grace remain intact. Eighteen hostiles, six simultaneous attackers, 240 live projectiles and 35% projectile-speed growth remain hard safety limits. Difficulty is derived from mode and wave, so retries and resumed checkpoints reconstruct the same challenge without adding save fields.
 
-Invaders is an uninterrupted formation campaign: no free-flight missions, carriers or bonus detours. The defensive lane stays locked between waves. Original alien saucers march, swoop, converge from both flanks and weave; the pattern changes each wave. Flights grow from eight to eighteen aliens, then additional flights keep increasing the total roster. Movement and firing pressure rise every wave within readable limits. Clear a wave to begin the next immediately, or use the short recovery interval. Every third wave ends at a supply stop with the usual weapon and repair shop.
+Invaders is an uninterrupted formation campaign. The defensive lane stays locked between waves. Original alien saucers march, swoop, converge from both flanks and weave; the pattern changes each wave. Flights grow from eight to eighteen aliens, then additional flights keep increasing the total roster. Movement and firing pressure rise every wave within readable limits. Clear a wave to begin the next immediately, or use the short recovery interval. Collect weapon cores and repair cells during combat. Every 20,000 points awards an extra life, capped at five, with the next milestone visible on the HUD. Crossed milestones are consumed even at the cap.
+
+Invaders rewards deliberate aim. Tier-one cooldowns are 0.60 seconds for Pulse, 1.00 for Spread and 1.40 for Lance; each upgrade shortens these by 8% of the base time. Switching weapons does not bypass cooldown. Aliens take staggered firing turns, with individual cooldowns starting at 5.6 seconds and gradually shortening as waves advance. Each attack keeps its visible warning. The HUD shows weapon readiness and the current wave's accuracy, hits, shots and misses; accuracy remains visible during recovery.
+
+Every missed Invaders bolt costs 5 points, with score floored at zero. Spread counts as three shots: one hit and two misses means 33% accuracy and a 10-point penalty. Hitting an alien or intercepting hostile fire counts as a hit; Lance can hit several targets but earns one accuracy hit per bolt. Airborne misses settle when the wave clears. Each new wave starts fresh accuracy counters; respawning preserves the current wave's score and accuracy.
 
 Smuggler Run alternates asteroid belts and canyon runs. Legs 1/2 use difficulty 1, legs 3/4 use difficulty 2, through difficulty 8 at legs 15/16; later legs generate new seeded courses at that maximum difficulty. Each leg uses a fresh three-hit runner with all three tier-one weapons and a defensive blast. Deliver through the EXIT gate to bank 25 points per salvage/target point, plus 1,000 delivery points, 100 per remaining hull point and 150 per difficulty above 1. Crashes, route failure, missed exits and timeouts cost a life and discard that leg's unbanked haul. Every 5,000 banked points awards an extra life, capped at five; thresholds are consumed even at the cap. There is no safe bonus-exit button in this mode. Saving and leaving restarts the same leg without charging a life or banking its unfinished haul.
 
-All four modes begin with three lives. Losing a ship or a required objective retries the checkpoint, restores its starting equipment and rolls back unbanked rewards. Continues refill three lives and reset the score. The ten-second game-over screen allows immediate relaunch or continue. Leaving preserves the available checkpoint. Each mode owns its checkpoint, best/continued records and a separate top-ten high-score screen; an ongoing run updates its entry instead of adding duplicate rows.
+All four modes begin with three lives. While lives remain, a destroyed combat ship automatically respawns with full hull and shields, keeping the current fight, equipment, cargo, score and wave accuracy. Three seconds of protection flash the visible ship blue; cockpit flight shows a blue shield outline and a lives-remaining message. Protection freezes during pause and restores normal colours when it expires. Failed main objectives and Smuggler courses restart automatically from their checkpoint, rolling back unbanked rewards. Only zero lives opens the ten-second game-over screen; Continue immediately refills three lives and resets the score. Leaving preserves the available checkpoint. Each mode owns its checkpoint, best/continued records and a separate top-ten high-score screen; an ongoing run updates its entry instead of adding duplicate rows.
 
 The title has four mode choices with live, original vector previews. Smuggler's preview alternates the actual asteroid and canyon courses. Previews do not affect saves or scores. Controls, weapon descriptions, high scores and Ships & Objects each have their own menu.
 
@@ -69,6 +73,8 @@ Interceptions charge the defensive blast by 10%; kills add 5%. At full charge, t
 Destroyed ships shed spinning wireframe hull panels in their faction colours. After a short staggered delay, each panel bursts into a coloured spark shower with a secondary crackle. These are cosmetic effects: kills and cargo pay immediately, debris cannot hit the player or be collected, and pausing freezes the animation. Panel and shower counts are capped during mass kills.
 
 Legal cargo sells at stations and docks; contraband sells only at the black market. The normal collection magnet is 20 units, upgraded to 35. Contraband always requires deliberate close collection. Police collect contraband only; civilians avoid it; essential mission cargo is protected.
+
+Repair cells restore 30 hull and 30 shield, capped at the ship's capacities. Invaders drops repairs, weapon cores and score-bearing cash salvage; capped weapon cores award 200 extra points. Hull and shield recovery in Invaders comes from these pickups or a respawn, with damage carried between waves.
 
 Dock prices: tier 2 350 CR, tier 3 800 CR, repairs 150 CR, shield capacity 300 CR, magnet 200 CR. The opening stage guarantees at least 385 CR at completion. Tier 3 opens at Journey stage 5 or Attack Challenge/Invaders wave 8. Fresh runs gain no permanent starting power; unlocks only offer starting weapon choices.
 
@@ -116,40 +122,44 @@ npx playwright install chromium
 npm test
 ```
 
-- `npm test`: runs the Vitest unit suite, then the Playwright browser suite. No manually started server is needed.
-- `npm run test:unit`: fast deterministic tests for gameplay rules and the actual combat/world controllers.
-- `npm run test:e2e`: browser controls, all four modes, bonus flights, saves, menus, audio and WebGL rendering.
+- `npm test`: runs Vitest unit/integration tests, then the focused Playwright suite. No manually started server is needed.
+- `npm run test:unit`: source-adjacent unit tests of rules, controllers and view models; no application instance or Chromium.
+- `npm run test:integration`: four short checks that menu actions, lifecycle events and HUD updates are wired into the application.
+- `npm run test:e2e`: native controls, short play flows, responsive menus, audio and WebGL rendering.
 - `npm run test:e2e -- tests/e2e/controls.spec.ts`: run one browser suite.
 - `npm run test:e2e:ui`: interactive Playwright test explorer.
 - `npm run test:report`: open the last browser HTML report, including attached screenshots and failure traces.
-- `npm run test:coverage`: unit-only coverage in `coverage/index.html`, with enforced minimums for core rules and combat/world code.
+- `npm run test:coverage`: unit-only coverage in `coverage/index.html`, with strict module thresholds for session decisions, HUD projection and gameplay rules.
 - `npm run lint`: type-aware ESLint, including unsafe values, unhandled promises and unused code.
 - `npm run typecheck`: strict TypeScript checks for application, tests and configuration.
 - `npm run build`: typecheck and production bundle.
-- `npm run check`: lint, static type checks, both test suites and production build.
+- `npm run check`: lint, static types, fast tests with coverage, and the browser suite with a production build. Each suite runs once.
 
-Playwright manages a separate server at `127.0.0.1:5180`; it will not reuse an existing process there. It leaves the player's development server on port 5173 and browser saves alone. Each test gets a fresh browser context. Tests run one at a time to avoid contention between WebGL and pointer-lock sessions. Expect several minutes for the complete suite; unit tests alone are much faster.
+Playwright manages a separate server at `127.0.0.1:5180`; it will not reuse an existing process there. It leaves the player's development server on port 5173 and browser saves alone. Each test gets a fresh browser context. Browser tests run serially to avoid WebGL and pointer-lock contention. Stage destinations, respawns, rewards and course outcomes are tested directly from state; course geometry is tested with its own controller.
 
-Failure screenshots and traces are in `test-results/`, with the HTML report in `playwright-report/`. Long mouse-pilot tests retain action traces without per-input DOM/video capture. These generated directories are ignored by Git. CI installs Chromium and runs the same checks on each push and pull request.
+Failure screenshots, traces and machine-readable test timings are in `test-results/`, with the HTML report in `playwright-report/`. These generated directories are ignored by Git. CI installs headless Chromium and runs the same checks on each push and pull request.
 
-Suite responsibilities and the distinction between fixture-driven traversal and real combat are documented in [Testing](docs/testing.md). Browser checks cannot prove human enjoyment, audio-device output, or playability on every GPU.
+Suite responsibilities and coverage boundaries are documented in [Testing](docs/testing.md). Browser checks cannot prove human enjoyment, audio-device output, or playability on every GPU.
 
 ## Structure And Originality
 
 Start with the [Code Guide](docs/code-guide.md) for a human-readable tour, the game-loop flow, save/reward rules, and a map of where to make changes. Comments in the source explain the less obvious decisions and ownership boundaries.
 
-- `game.ts`: application lifecycle, stage transitions and fixed 60 Hz orchestration shared by all four modes.
+- `game.ts`: fixed 60 Hz orchestration connecting controllers to input, world objects, audio and browser presentation.
+- `session/flight-lifecycle.ts`: damage, queued respawn, pause, protection and game-over timing.
+- `session/stage-flow.ts`, `session/encounter-outcome.ts`: objective requirements, opening salvage, once-only settlements and transition destinations.
 - `modes.ts`, `invaders.ts`, `smuggler.ts`, `scores.ts`: mode definitions, alien formations, delivery/life rules and per-mode score tables.
 - `combat/projectiles.ts`: projectile ownership, swept contacts, interceptions and faction collision rules.
 - `combat/enemies.ts`: enemy movement, targeting, warnings and attack cadence.
 - `world/actors.ts`: actor lifecycle, original encounter formations and level population.
 - `world/interactions.ts`: salvage magnets, trade, police dispatch/scans and solid-world collision.
-- `rendering/effects.ts` and `rendering/hud.ts`: visual effects lifecycle and HUD/radar presentation.
+- `rendering/hud-model.ts`: pure state-to-HUD projection; `rendering/hud.ts` applies it to the DOM. `rendering/effects.ts` owns visual effects.
 - `menus/views.ts`, `menus/front.ts`, `menus/smuggler.ts`: menu content built from explicit run/profile inputs; `menus/mode-preview.ts` owns title simulations.
 - `input-layouts.ts` and `menus/controls.ts`: shared, saved control bindings and their title/briefing labels.
 - `models/`: separate wireframe primitives, ship silhouettes, landmarks, projectiles and object catalog. `models.ts` exports the shared model API.
 - `input.ts`, `encounters.ts`, `weapons.ts`, `arcade.ts`, `bonus.ts` and `canyon.ts`: control, encounter, weapon, progression and bonus-course rules.
-- `tests/e2e/fixtures/`: shared typed browser driver and mouse pilot. Debug controls are exposed only in development builds.
+- `tests/e2e/fixtures/`: browser driver and pixel fixtures. Debug controls are exposed only in development builds.
+- `tests/integration/`: four adapter-wiring checks with a DOM/device harness, run separately from unit tests and their coverage.
 
 All ship outlines, formations, canyon paths, vector lettering and sound phrases are procedural original assets. No film, television or commercial game artwork, names, music or recreated levels are included. Three.js provides geometry, curves and rendering. Broad arcade mechanics are inspirations, not copied expressive assets.
 

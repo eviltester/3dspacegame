@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
-// Fast rules/controller tests run without a browser or WebGL context. Browser
-// integration is Playwright's responsibility, so its specs are excluded here.
+// Unit tests exercise production rules/controllers without an application instance.
+// Adapter wiring has its own config and is not included in unit coverage.
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
@@ -12,9 +12,14 @@ export default defineConfig({
       exclude: ['src/**/*.test.ts', 'src/main.ts', 'src/**/*.d.ts', 'src/testing/**'],
       reporter: ['text', 'html', 'lcov'],
       thresholds: {
-        // Rendering and DOM orchestration are exercised mainly in the browser.
-        // Apply stricter unit floors to state, combat and world logic separately.
-        statements: 50, branches: 50, functions: 45, lines: 55,
+        // This global baseline counts ALL source, including uncovered browser
+        // coordination. Do not inflate it with integration runs or exclusions.
+        // Directly testable rules have their own, much stricter coverage gates.
+        statements: 60, branches: 64, functions: 60, lines: 65,
+        'src/session/*.ts': { lines: 100, branches: 100, functions: 100 },
+        'src/rendering/hud-model.ts': { lines: 100, branches: 90, functions: 100 },
+        'src/menus/object-scan.ts': { lines: 100, branches: 100, functions: 100 },
+        'src/{life-rewards,rendering/player-protection}.ts': { lines: 100, branches: 80, functions: 100 },
         'src/{arcade,bonus,canyon,encounters}.ts': { lines: 90, branches: 85, functions: 60 },
         'src/{modes,invaders,smuggler,scores}.ts': { lines: 95, branches: 85, functions: 95 },
         'src/combat/*.ts': { lines: 85, branches: 75, functions: 80 },

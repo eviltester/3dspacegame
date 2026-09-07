@@ -242,6 +242,7 @@ export function applyCargoPickup(progress: PlayerProgress, drop: CargoDrop): Pla
   const inventory = { ...progress.inventory };
   let credits = progress.credits;
   let shield = progress.shield;
+  let hull = progress.hull;
   let weaponLevel = progress.weaponLevel;
   let score = progress.score;
 
@@ -268,6 +269,7 @@ export function applyCargoPickup(progress: PlayerProgress, drop: CargoDrop): Pla
       break;
     case 'shieldCell':
       shield = Math.min(progress.maxShield, shield + 30 * amount);
+      hull = Math.min(100, hull + 30 * amount);
       score += 15 * amount;
       break;
     case 'rescuePod':
@@ -281,6 +283,7 @@ export function applyCargoPickup(progress: PlayerProgress, drop: CargoDrop): Pla
     credits,
     score,
     shield,
+    hull,
     weaponLevel,
     inventory
   };

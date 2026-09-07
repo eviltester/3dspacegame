@@ -1,10 +1,9 @@
-import { build, preview } from 'vite';
+import { preview } from 'vite';
 import type { PreviewServer } from 'vite';
 import { test, expect } from './fixtures/game';
 
 let server: PreviewServer;
 test.beforeAll(async () => {
-  await build({ logLevel: 'error' });
   server = await preview({ base: '/3dspacegame/', preview: { host: '127.0.0.1', port: 5181, strictPort: true } });
 });
 test.afterAll(async () => { if (server) await new Promise<void>((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve())); });
