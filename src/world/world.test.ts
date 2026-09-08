@@ -34,6 +34,20 @@ it('reproduces enemy positions and attaches separately breakable carrier systems
   expect(carrier.essential).toBe(true); expect(a.actors.actors.filter(x => x.parent === carrier.id)).toHaveLength(a.definition.bossParts);
   a.actors.clear(); b.actors.clear();
 });
+it('assigns distinct voices to haulers, saucers, police, boss guns and alien models at creation', () => {
+  const f = fixture(6);
+  expect(f.level.objectiveShip?.firingVoice).toBe('trader');
+  expect(f.actors.actors.find(actor => actor.kind === 'trader' && !actor.essential)?.firingVoice).toBe('saucer');
+  expect(f.actors.actors.find(actor => actor.kind === 'police')?.firingVoice).toBe('police');
+  f.run.mode = 'invaders';
+  const aliens = f.actors.spawnPack(['raider', 'flanker', 'diver'], { ...f.frame, rng: new Random(1) });
+  expect(aliens.map(actor => actor.firingVoice)).toEqual(['invaderRaider', 'invaderFlanker', 'invaderDiver']);
+  f.actors.clear();
+  const boss = fixture(4);
+  boss.actors.spawnPack(['carrier'], { ...boss.frame, rng: new Random(1) });
+  expect(boss.actors.actors.filter(actor => actor.kind === 'part').every(actor => actor.firingVoice === 'carrierTurret')).toBe(true);
+  boss.actors.clear();
+});
 it('collects magnet salvage once, including an actual weapon improvement', () => {
   const { actors, interactions, frame, run, events } = fixture();
   const core = actors.cargo({ type: 'weaponCore', amount: 1 }, new THREE.Vector3(15, 0, 0), true);
@@ -56,17 +70,19 @@ it('trades and delivers rescue cargo once at the station', () => {
   expect(run.pilot.credits).toBe(credits); expect(events.traded).toHaveBeenCalledOnce();
 });
 it('dispatches one reinforcement group for a warrant, then resets for the next stage', () => {
-  const { interactions, frame, actors } = fixture(); frame.run.pilot.wanted.active = true;
+  const { interactions, frame, actors, events } = fixture(); frame.run.pilot.wanted.active = true;
   const police = () => actors.actors.filter(a => a.kind === 'police').length;
   interactions.enforce(7, frame); expect(police()).toBe(1);
   interactions.enforce(1, frame); expect(police()).toBe(4); interactions.enforce(20, frame); expect(police()).toBe(4);
+  expect(events.warning).toHaveBeenCalledExactlyOnceWith('POLICE DISPATCHED FROM NEAREST STATION', 'policeDispatch');
   interactions.reset(); interactions.enforce(8, frame); expect(police()).toBe(7);
 });
 it('confiscates contraband only after a lawful scan delay', () => {
-  const { interactions, frame } = fixture(); frame.position.copy(frame.base.object.position);
+  const { interactions, frame, events } = fixture(); frame.position.copy(frame.base.object.position);
   frame.run.pilot.inventory.contraband = 1; frame.run.pilot.credits = 500;
   interactions.enforce(4, frame); expect(frame.run.pilot.inventory.contraband).toBe(1);
   interactions.enforce(1, frame); expect(frame.run.pilot.inventory.contraband).toBe(0); expect(frame.run.pilot.wanted.active).toBe(false);
+  expect(events.warning).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'policeScan');
 });
 it('pushes the player outside solid landmarks and limits collision speed, but never blocks armada lanes', () => {
   const { interactions, frame } = fixture(); frame.position.copy(frame.base.object.position);

@@ -23,22 +23,23 @@ it('every actual gun-bolt impact costs twenty shield, including simultaneous hit
   for (let hull = 2; hull >= 0; hull--) { incoming(bonus, camera); step(); expect(bonus.state.health).toBe(hull); }
   expect(bonus.state.reason).toBe('crash'); expect(bonus.canyon!.shots).toHaveLength(0); bonus.dispose();
 });
-it('canyon wall contact empties shields, repeated contact has grace, and an unshielded impact costs one hull', () => {
+it('canyon scrapes cost ten shield or ten damage, with grace between repeated contacts', () => {
   const { bonus, step } = course();
-  step(0, 1000); expect(bonus.state.shield).toBe(0); expect(bonus.state.health).toBe(3);
+  step(0, 1000); expect(bonus.state.shield).toBe(90); expect(bonus.state.health).toBe(3);
   step(0.1); expect(bonus.state.health).toBe(3);
-  step(1.21); expect(bonus.state.health).toBe(2); expect(bonus.state.finished).toBe(false);
+  bonus.state.shield = 0;
+  step(1.21); expect(bonus.state.damage).toBe(10); expect(bonus.state.health).toBe(3); expect(bonus.state.finished).toBe(false);
   bonus.dispose();
 });
 it('respawn protection ignores gun and wall hits until it expires', () => {
   const { bonus, camera, step } = course(); bonus.protect(3);
   incoming(bonus, camera); step(0, 1000); expect(bonus.state).toMatchObject({ health: 3, shield: 100 });
   step(1); expect(bonus.state.shield).toBe(100);
-  step(2.01); expect(bonus.state.shield).toBe(0); expect(bonus.state.health).toBe(3); bonus.dispose();
+  step(2.01); expect(bonus.state.shield).toBe(90); expect(bonus.state.health).toBe(3); bonus.dispose();
 });
 it('colliding with a crate uses the shield-impact rule but never grants a kill or haul', () => {
   const { bonus, step } = course(); const target = bonus.canyon!.targets[0]; target.used = false; target.object.position.set(0, 0, 0);
-  step(); expect(target.used).toBe(true); expect(bonus.state).toMatchObject({ shield: 0, health: 3, points: 0, haul: 0 });
+  step(); expect(target.used).toBe(true); expect(bonus.state).toMatchObject({ shield: 80, health: 3, points: 0, haul: 0 });
   expect(bonus.cargo.drops).toHaveLength(0); bonus.dispose();
 });
 it('shot crates release haul, collection changes cargo only, and EXIT pays once with a saved breakdown', () => {
@@ -50,11 +51,12 @@ it('shot crates release haul, collection changes cargo only, and EXIT pays once 
   bonus.cargo.drops[0].object.position.set(0, 0, -5); step(); expect(bonus.state).toMatchObject({ haul: 1, points: 0 });
   step(); expect(bonus.state.haul).toBe(1); expect(bonus.state.notice).toContain('HAUL +1');
   expect(settleCourse(run, bonus.state, bonus.ratio)).toBeNull(); expect(run.pilot.score).toBe(0);
-  bonus.finish('complete'); expect(settleCourse(run, bonus.state, bonus.ratio)?.score).toBe(1375);
+  bonus.finish('complete'); const paid = settleCourse(run, bonus.state, bonus.ratio)!;
+  expect(run.smugglerResult?.haulPoints).toBe(75); expect(paid.score).toBeGreaterThan(1375);
   expect(run.stageHaul).toBe(1); expect(settleCourse(run, bonus.state, bonus.ratio)).toBeNull();
   const profile = freshProfile(); saveCheckpoint(profile, run);
   const saved = parseProfile(JSON.stringify(profile), null).checkpoints.smuggler!;
-  expect(saved.stageHaul).toBe(1); expect(saved.pilot.score).toBe(1375); expect(settleCourse(saved, bonus.state, bonus.ratio)).toBeNull(); bonus.dispose();
+  expect(saved.stageHaul).toBe(1); expect(saved.pilot.score).toBe(paid.score); expect(settleCourse(saved, bonus.state, bonus.ratio)).toBeNull(); bonus.dispose();
 });
 it.each(['shield', 'repair'] as const)('%s collection restores canyon shield alongside its hull repair', kind => {
   const { bonus, step } = course(); bonus.state.health = 1; bonus.state.shield = 0;
@@ -76,7 +78,7 @@ it('a solid pillar impact drains shields, deflects the skiff and never halts for
   const item = canyon.barriers.items[0]; item.base.set(0, -32, -15);
   bonus.step(0.01, { x: 0, y: 0 }, camera);
   for (let tick = 0; tick < 120; tick++) bonus.step(1 / 60, { x: 0, y: 0 }, camera);
-  expect(bonus.state.shield).toBe(0); expect(bonus.state.health).toBe(3);
+  expect(bonus.state.shield).toBe(80); expect(bonus.state.health).toBe(3);
   expect(item.collided).toBe(true); expect(camera.position.z).toBeLessThan(-90);
   expect(Math.abs(canyon.offset.x)).toBeGreaterThan(5); expect(bonus.state.finished).toBe(false); bonus.dispose();
 });

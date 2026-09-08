@@ -67,7 +67,7 @@ describe('damage and life transitions', () => {
 });
 describe('protection and pause contracts', () => {
   it.each(['journey', 'endless', 'invaders', 'smuggler'] as const)('%s pauses timers and cannot take damage while protected', mode => {
-    const { run, life } = flight(mode); life.fail(run, 'checkpoint'); life.consumeRespawn(run);
+    const { run, life } = flight(mode); life.fail(run, 'checkpoint'); life.tick(run, 4); life.consumeRespawn(run);
     expect(life.damage(run, 500).type).toBe('ignored'); life.tick(run, 1); expect(life.protection).toBe(2);
     expect(life.pause(run)).toBe(true); expect(life.pause(run)).toBe(false); life.tick(run, 20);
     expect(life.protection).toBe(2); expect(life.canStep(run)).toBe(false); expect(life.damage(run, 500).type).toBe('ignored');
@@ -90,11 +90,17 @@ describe('protection and pause contracts', () => {
     for (const dt of [-1, 0, NaN, Infinity]) life.tick(run, dt);
     expect(life.protection).toBe(3);
   });
-  it('counts down only visible game-over time, returning to title exactly once', () => {
-    const life = new FlightLifecycle(); expect(life.tickDisplay(20, false)).toBe(false); life.showGameOver();
-    for (const dt of [-1, 0, NaN, Infinity]) expect(life.tickDisplay(dt, false)).toBe(false);
-    expect(life.tickDisplay(50, true)).toBe(false); expect(life.deathCountdown).toBe(10);
-    expect(life.tickDisplay(9, false)).toBe(false); expect(life.deathCountdown).toBe(1);
-    expect(life.tickDisplay(1, false)).toBe(true); expect(life.menu).toBe('title'); expect(life.tickDisplay(1, false)).toBe(false);
+  it('game over waits indefinitely for a player action', () => {
+    const { run, life } = flight(); run.lives = 1; life.fail(run, 'checkpoint');
+    life.tick(run, 3600); expect(life.menu).toBe('gameover'); expect(life.canStep(run)).toBe(false);
+  });
+  it('Smuggler pauses for four active seconds before respawning, with focus/menu pause support', () => {
+    const { run, life } = flight('smuggler'); life.fail(run, 'checkpoint');
+    expect(life.respawnDelay).toBe(4); expect(life.consumeRespawn(run)).toBeNull();
+    life.tick(run, 2); expect(life.respawnDelay).toBe(2); expect(life.pause(run)).toBe(true);
+    life.tick(run, 100); expect(life.respawnDelay).toBe(2); life.launch(run);
+    for (let i = 0; i < 119; i++) life.tick(run, 1 / 60);
+    expect(life.consumeRespawn(run)).toBeNull(); life.tick(run, 1 / 60);
+    expect(life.consumeRespawn(run)).toBe('checkpoint'); expect(life.protection).toBe(3); expect(run.lives).toBe(2);
   });
 });

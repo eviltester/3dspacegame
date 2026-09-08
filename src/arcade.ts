@@ -6,15 +6,19 @@
  */
 import { applyCargoPickup, createInitialProgress, instantTrade } from './logic';
 import type { CargoDrop, CargoType, Faction, PlayerProgress } from './logic';
-import { isControlScheme, tiltSensitivity } from './input-layouts';
+import { isControlScheme, tiltSensitivity, mouseSensitivity } from './input-layouts';
 import type { ControlScheme } from './input-layouts';
-import { GAME_MODES, SMUGGLER_EXTRA_LIFE_SCORE } from './modes';
+import { GAME_MODES } from './modes';
 import type { GameMode } from './modes';
 import { emptyScoreboards, parseScoreboards, recordScore } from './scores';
 import type { Scoreboards } from './scores';
 import { emptyAccuracy, parseAccuracy } from './combat/accuracy';
 import type { WaveAccuracy } from './combat/accuracy';
 import { lifeScoreInterval } from './life-rewards';
+import { freshSkiff, parseSkiff } from './skiff-vitals';
+import type { SkiffVitals } from './skiff-vitals';
+import { parseSmugglerFlight, parseSmugglerResult } from './smuggler-rewards';
+import type { SmugglerFlight, SmugglerResult } from './smuggler-rewards';
 
 export type { GameMode } from './modes';
 export type WeaponFamily = 'pulse' | 'spread' | 'lance';
@@ -31,13 +35,18 @@ export interface RunResources {
   charge: number;
 }
 export interface RunState extends RunResources {
+  /** Smuggler craft condition persists across courses and resumed checkpoints. */
+  skiff: SkiffVitals;
+  /** Evidence survives interrupted flights; paid summaries cannot pay twice. */
+  smugglerFlight: SmugglerFlight | null;
+  smugglerResult: SmugglerResult | null;
   /** Identifies the whole run across retries/resumes, not one particular stage. */
   id: string;
   /** Next score milestone; kept outside retryable resources to prevent repeat awards. */
   nextLifeScore: number;
   /** Last delivered haul, retained so a resumed result screen can show it again. */
   stageReward: number;
-  /** Delivered canyon pickups, for the paid three-second summary; null on other legs. */
+  /** Delivered course pickups, for the paid three-second summary. */
   stageHaul: number | null;
   /** Per-wave projectile results, retained on cleared checkpoints. */
   accuracy: WaveAccuracy;
@@ -64,7 +73,7 @@ export interface RunState extends RunResources {
 // starting-weapon unlocks are choices, never permanent damage or money bonuses.
 export interface ProfileSaveV2 {
   version: 2;
-  settings: { aimAssist: boolean; muted: boolean; controlScheme: ControlScheme; tiltSensitivity: number };
+  settings: { aimAssist: boolean; muted: boolean; controlScheme: ControlScheme; tiltSensitivity: number; mouseSensitivity: number };
   unlocked: WeaponFamily[];
   records: Record<GameMode | `${GameMode}Continued`, number>;
   scoreboards: Scoreboards;
@@ -87,8 +96,8 @@ export const resources = (run: RunResources): RunResources => clone({ pilot: run
 
 export function newRun(mode: GameMode, seed: number, family: WeaponFamily = 'pulse'): RunState {
   const base: RunResources = { pilot: createInitialProgress(), family, tiers: { pulse: 1, spread: 1, lance: 1 }, magnet: 20, charge: 0 };
-  return { ...base, mode, id: `${mode}-${seed}`, nextLifeScore: lifeScoreInterval(mode), stageReward: 0, seed: seed >>> 0, stage: 1, lives: 3, continued: false, phase: 'briefing', checkpoint: resources(base),
-    cleared: false, stageHaul: null, bonusStatus: 'available', chain: { kills: 0, multiplier: 1, remaining: 0, recent: [] }, elapsed: 0,
+  return { ...base, mode, skiff: freshSkiff(mode === 'smuggler'), id: `${mode}-${seed}`, nextLifeScore: lifeScoreInterval(mode), stageReward: 0, seed: seed >>> 0, stage: 1, lives: 3, continued: false, phase: 'briefing', checkpoint: resources(base),
+    cleared: false, stageHaul: null, smugglerFlight: null, smugglerResult: null, bonusStatus: 'available', chain: { kills: 0, multiplier: 1, remaining: 0, recent: [] }, elapsed: 0,
     timeRemaining: STAGE_TIME_LIMIT, timeBonus: null, kills: 0, earlyCore: false, accuracy: emptyAccuracy() };
 }
 
@@ -224,6 +233,8 @@ export function retry(run: RunState, useContinue = false): void {
     run.pilot.score = 0;
     run.checkpoint.pilot.score = 0;
     run.nextLifeScore = lifeScoreInterval(run.mode);
+    run.skiff = freshSkiff(run.mode === 'smuggler');
+    run.smugglerFlight = null;
   }
   run.cleared = false;
   run.elapsed = 0;
@@ -233,6 +244,7 @@ export function retry(run: RunState, useContinue = false): void {
   run.accuracy = emptyAccuracy();
   run.earlyCore = false;
   run.stageReward = 0;
+  run.smugglerResult = null;
   run.stageHaul = null;
   run.bonusStatus = 'available';
   run.phase = 'briefing';
@@ -240,6 +252,8 @@ export function retry(run: RunState, useContinue = false): void {
 }
 export function loseLife(run: RunState): void {
   run.lives = Math.max(0, run.lives - 1);
+  run.skiff = freshSkiff(run.mode === 'smuggler');
+  run.smugglerFlight = null;
   retry(run);
   run.phase = 'gameover';
 }
@@ -255,6 +269,8 @@ export function advance(run: RunState): void {
   if (!run.cleared) return;
   if (run.mode === 'journey' && run.stage >= JOURNEY_STAGE_COUNT) { run.phase = 'victory'; return; }
   run.stage += 1;
+  run.smugglerFlight = null;
+  run.smugglerResult = null;
   run.phase = 'briefing';
   run.cleared = false;
   run.elapsed = 0;
@@ -285,7 +301,7 @@ export function freshProfile(legacy: unknown = null): ProfileSaveV2 {
   const unlocked: WeaponFamily[] = ['pulse'];
   if (Number(old.unlockedWeaponLevel) >= 2) unlocked.push('spread');
   if (Number(old.unlockedWeaponLevel) >= 3) unlocked.push('lance');
-  return { version: 2, settings: { aimAssist: true, muted: false, controlScheme: 'mouse', tiltSensitivity: 1 }, unlocked, legacyScore: Math.max(0, Number(old.bestScore) || 0),
+  return { version: 2, settings: { aimAssist: true, muted: false, controlScheme: 'mouse', tiltSensitivity: 1, mouseSensitivity: 1 }, unlocked, legacyScore: Math.max(0, Number(old.bestScore) || 0),
     records: { journey: 0, endless: 0, invaders: 0, smuggler: 0, journeyContinued: 0, endlessContinued: 0, invadersContinued: 0, smugglerContinued: 0 }, scoreboards: emptyScoreboards(), checkpoints: {} };
 }
 /**
@@ -321,12 +337,16 @@ export function parseProfile(raw: string | null, legacy: string | null, defaultS
     profile.settings.muted = parsed.settings?.muted === true;
     if (isControlScheme(parsed.settings?.controlScheme)) profile.settings.controlScheme = parsed.settings.controlScheme;
     profile.settings.tiltSensitivity = tiltSensitivity(parsed.settings?.tiltSensitivity);
+    profile.settings.mouseSensitivity = mouseSensitivity(parsed.settings?.mouseSensitivity);
     profile.legacyScore = Math.max(fallback.legacyScore, Number(parsed.legacyScore) || 0);
     profile.scoreboards = parseScoreboards(parsed.scoreboards);
     for (const key of Object.keys(profile.records) as Array<keyof typeof profile.records>) profile.records[key] = Math.max(0, Number(parsed.records?.[key]) || 0);
     for (const mode of GAME_MODES) {
       const run = parsed.checkpoints?.[mode];
       if (validCheckpoint(run, mode)) {
+        run.skiff = parseSkiff(run.skiff, mode === 'smuggler');
+        run.smugglerFlight = run.smugglerFlight ? parseSmugglerFlight(run.smugglerFlight) : null;
+        run.smugglerResult = parseSmugglerResult(run.smugglerResult);
         run.accuracy = parseAccuracy(run.accuracy);
         if (typeof run.id !== 'string') run.id = `${mode}-legacy-${run.seed}`;
         const lifeInterval = lifeScoreInterval(mode);
@@ -353,7 +373,8 @@ export function parseProfile(raw: string | null, legacy: string | null, defaultS
 function validCheckpoint(run: RunState | undefined, mode: GameMode): run is RunState {
   if (!run || run.mode !== mode || !Number.isInteger(run.stage) || run.stage < 1 || (mode === 'journey' && run.stage > JOURNEY_STAGE_COUNT)) return false;
   if (run.practice !== undefined && run.practice !== false) return false;
-  if (run.nextLifeScore !== undefined && (!Number.isSafeInteger(run.nextLifeScore) || run.nextLifeScore < SMUGGLER_EXTRA_LIFE_SCORE || run.nextLifeScore % SMUGGLER_EXTRA_LIFE_SCORE !== 0)) return false;
+  // Accept positive stored milestones before aligning them to the current rules.
+  if (run.nextLifeScore !== undefined && (!Number.isSafeInteger(run.nextLifeScore) || run.nextLifeScore <= 0)) return false;
   if (run.stageReward !== undefined && !Number.isSafeInteger(run.stageReward)) return false;
   if (run.stageHaul !== undefined && run.stageHaul !== null && (!Number.isSafeInteger(run.stageHaul) || run.stageHaul < 0)) return false;
   if (!['briefing', 'playing', 'cleared', 'recovery', 'bonusOffer', 'bonus', 'bonusResult', 'shop', 'gameover', 'victory'].includes(run.phase)) return false;

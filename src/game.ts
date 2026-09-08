@@ -91,8 +91,8 @@ export class ArcadeGame {
       this.checkScoreLives();
       this.sound.pickup();
     },
-    traded: message => { this.log(message); this.sound.pickup(); },
-    warning: message => { this.log(message); this.sound.warning(); }
+    traded: message => { this.log(message); this.sound.cue('transaction'); },
+    warning: (message, cue) => { this.log(message); this.sound.cue(cue); }
   });
   private get actors(): readonly Actor[] { return this.actorWorld.actors; }
   private readonly projectiles = new ProjectileSystem(this.world, () => this.nextId++);
@@ -104,7 +104,8 @@ export class ArcadeGame {
     damagePlayer: (damage, message) => this.damagePlayer(damage, message),
     announceArrival: (actors, message) => this.announceArrival(actors, message),
     spawnShot: (...args) => this.spawnShot(...args),
-    enemyShoot: (faction, distance) => this.sound.enemyShoot(faction, distance),
+    enemyShoot: (voice, distance) => this.sound.enemyShoot(voice, distance),
+    lockOn: () => this.sound.cue('lockOn'),
     stopped: () => !!this.flight.menu || this.flight.pendingRespawn !== null
   });
   private get shots() { return this.projectiles.shots; }
@@ -115,6 +116,7 @@ export class ArcadeGame {
   private readonly orientation = new THREE.Quaternion();
   private readonly stars: THREE.Points;
   private bonus: BonusController | null = null;
+  private aftermath: BonusController | null = null;
   // menu is a screen name; run.phase is gameplay progress. They are intentionally
   // separate: opening Controls must not discard a paused course or recovery interval.
   private readonly flight = new FlightLifecycle();
@@ -191,6 +193,7 @@ export class ArcadeGame {
     this.mobileControls.refresh();
   }
   private showTitle(): void {
+    if (this.aftermath) this.disposeCourse();
     this.flight.paused = false;
     this.ui.selectMode(this.selectedMode);
     this.show(...MenuViews.title(this.profile, this.selectedMode, this.selectedFamily, this.levelWarpUnlocked));
@@ -225,7 +228,7 @@ export class ArcadeGame {
     this.input.clear();
     // Smuggler uses the same course renderer as bonus sorties, but keeps normal
     // run phases and life-loss rules. Optional sorties use phase="bonus" instead.
-    if (this.run.mode === 'smuggler' && !this.bonus && !this.run.cleared) {
+    if (this.run.mode === 'smuggler' && !this.bonus && !this.run.cleared && !this.flight.pendingRespawn) {
       const leg = smugglerLeg(this.run.stage); this.startCourse(leg.kind, leg.difficulty);
     }
     this.flight.launch(this.run);
@@ -315,11 +318,13 @@ export class ArcadeGame {
       this.loadStage(); this.persist(); void this.play(); return;
     }
     if (action.startsWith('equip:') && this.run.phase === 'shop') {
-      this.run.family = action.slice(6) as WeaponFamily;
+      const family = action.slice(6) as WeaponFamily;
+      if (family !== this.run.family) this.sound.cue('weaponSwitch');
+      this.run.family = family;
       this.run.pilot.weaponLevel = this.run.tiers[this.run.family]; this.persist(); this.showShop(); return;
     }
     if (action.startsWith('buy:')) {
-      if (purchase(this.run, action.slice(4) as Purchase)) this.sound.pickup();
+      if (purchase(this.run, action.slice(4) as Purchase)) this.sound.cue('transaction');
       this.persist(); this.showShop(); return;
     }
     if (action === 'depart' || action === 'nextWave') { this.nextStage(action === 'nextWave'); return; }
@@ -329,7 +334,10 @@ export class ArcadeGame {
     if (action === 'exitBonus' && this.run.mode !== 'smuggler') this.finishBonus('exit');
   }
   private showShop(): void {
-    dock(this.run); this.persist();
+    const credits = this.run.pilot.credits;
+    dock(this.run);
+    if (this.run.pilot.credits > credits) this.sound.cue('transaction');
+    this.persist();
     this.show(...MenuViews.shop(this.run));
   }
   private showBonusOffer(): void {
@@ -348,9 +356,10 @@ export class ArcadeGame {
   private startCourse(kind: BonusKind, difficulty: number): void {
     // Keep the main world allocated but hidden while a temporary course owns the
     // camera. Normal bonus equipment remains separate from the parked main ship.
-    this.bonus = new BonusController(kind, this.run.seed + this.run.stage, difficulty);
+    this.bonus = new BonusController(kind, this.run.seed + this.run.stage, difficulty, this.run.mode === 'smuggler',
+      this.run.mode === 'smuggler' ? this.run.skiff : undefined, this.run.mode === 'smuggler' ? this.run.smugglerFlight : undefined);
     this.bonus.state.family = this.run.family;
-    this.input.autoFlight = kind === 'canyon';
+    this.input.autoFlight = kind !== 'sequence';
     this.messages = []; this.feedbackTime = 0; this.popupTime = 0; this.hitTime = 0; this.arrivalTime = 0;
     this.world.visible = false; this.scene.add(this.bonus.root);
     this.camera.position.set(0, 0, 0); this.camera.quaternion.identity();
@@ -358,6 +367,7 @@ export class ArcadeGame {
   }
   private disposeCourse(): void {
     if (this.bonus) { this.scene.remove(this.bonus.root); this.bonus.dispose(); this.bonus = null; }
+    if (this.aftermath) { this.scene.remove(this.aftermath.root); this.aftermath.dispose(); this.aftermath = null; }
     this.input.autoFlight = false; this.world.visible = true;
   }
   private finishSmuggler(reason: NonNullable<BonusRunState['reason']>): void {
@@ -366,10 +376,19 @@ export class ArcadeGame {
     if (!this.bonus) return;
     this.bonus.finish(reason);
     const result = settleCourse(this.run, this.bonus.state, this.bonus.ratio);
-    this.disposeCourse(); this.flight.paused = false; this.record();
     if (!result || result.kind !== 'smuggler') return;
+    if (!result.success && this.run.lives > 0) {
+      // Detach settled flight data from the active course so saves cannot bank it
+      // twice. Its scene stays alive only until respawn or leaving for the title.
+      this.aftermath = this.bonus; this.bonus = null;
+    } else this.disposeCourse();
+    this.flight.paused = false; this.record();
+    if (result.extraLives) this.sound.cue('extraLife');
     if (!result.success) this.handleLifeDecision(this.flight.afterLifeSpent(this.run, 'checkpoint'));
-    else { if (result.extraLives) this.sound.pickup(); else this.sound.complete(); this.startCourseIntermission(); }
+    else {
+      if (result.score > 0) this.sound.cue('bonusPayment'); else this.sound.complete();
+      this.startCourseIntermission();
+    }
   }
   private startCourseIntermission(): void {
     if (!this.courseIntermission.start(this.run)) return;
@@ -391,6 +410,8 @@ export class ArcadeGame {
     this.record();
     if (!result || result.kind !== 'bonus') { this.showShop(); return; }
     if (outcome === 'wall' || outcome === 'crash') this.sound.damage(); else this.sound.complete();
+    if (result.score > 0 || result.credits > 0) this.sound.cue('bonusPayment');
+    if (result.extraLife) this.sound.cue('extraLife');
     const reasonText = outcome === 'gateMissed' ? 'EXIT GATE MISSED' : outcome === 'wall' ? 'EXIT MISSED / WALL IMPACT'
       : outcome === 'crash' ? 'LOAN SKIFF DESTROYED' : outcome === 'timeout' ? 'TIME UP' : outcome === 'exit' ? 'BONUS EXITED' : 'BONUS COMPLETE';
     this.show('bonusResult', result.medal, `${reasonText} / MAIN SHIP SAFE`, `<p class="result-score">+${result.score} POINTS</p>${scoreSummary}<p>+${result.credits} CREDITS${result.extraLife ? ' / EXTRA LIFE' : ''}</p><div class="menu-actions">${button('bonusDock', 'CONTINUE TO DOCK', 'id="launchButton"')}${this.warpBackButton()}</div>`);
@@ -408,7 +429,7 @@ export class ArcadeGame {
     if (decision.type === 'ignored') return;
     if (decision.record) this.record(decision.record); else this.persist();
     if (decision.type === 'gameover') { this.protection.clear(); this.sound.gameOver(); this.showGameOver(); }
-    else this.sound.explosion(0);
+    else { if (this.run.mode === 'smuggler') this.input.clear(); this.sound.explosion(0); }
   }
   private respawn(): void {
     const kind = this.flight.consumeRespawn(this.run);
@@ -428,7 +449,7 @@ export class ArcadeGame {
   private checkScoreLives(): void {
     if (this.run.mode !== 'invaders') return;
     const gained = awardScoreLives(this.run);
-    if (gained) { this.log(`EXTRA LIFE +${gained}! / ${this.run.lives} LIVES`); this.sound.pickup(); }
+    if (gained) { this.log(`EXTRA LIFE +${gained}! / ${this.run.lives} LIVES`); this.sound.cue('extraLife'); }
   }
   private nextStage(autoPlay = false): void {
     const result = advanceStage(this.run, !!this.bonus);
@@ -439,7 +460,7 @@ export class ArcadeGame {
     if (this.flight.protection > 0) this.protection.start(this.armadaRig?.craft, this.flight.protection);
     if (result.timeBonus !== null) {
       this.log(`TIME BONUS BANKED +CR ${result.timeBonus}`);
-      if (result.timeBonus > 0) this.sound.pickup();
+      if (result.timeBonus > 0) this.sound.cue('bonusPayment');
     }
     if (autoPlay) void this.play(); else this.briefing();
   }
@@ -453,8 +474,6 @@ export class ArcadeGame {
     // is paused. Clamp long gaps so returning to the browser cannot fast-forward a run.
     this.stats.frames += 1; this.stats.frameMs += real * 1000;
     this.ui.tick(real);
-    if (this.flight.tickDisplay(real, document.hidden)) this.showTitle();
-    else if (this.flight.menu === 'gameover') this.ui.text('deathTimer', String(Math.ceil(this.flight.deathCountdown)));
     if (this.flight.canStep(this.runState)) {
       this.accumulator += real;
       // A slow display frame may need multiple simulation ticks; a fast one may
@@ -467,7 +486,7 @@ export class ArcadeGame {
   };
   private resize(): void {
     this.renderer.setSize(innerWidth, innerHeight); this.camera.aspect = innerWidth / innerHeight; this.camera.updateProjectionMatrix(); this.ui.resize();
-    if (this.runState && !this.bonus) this.updateCamera();
+    if (this.runState && !this.bonus && !this.aftermath) this.updateCamera();
   }
   private updateCamera(): void {
     const locked = this.definition.kind === 'armada' && (!this.run.cleared || this.run.mode === 'invaders');
@@ -528,8 +547,12 @@ export class ArcadeGame {
   private step(dt: number): void {
     // Consume input once per tick, then hand it to exactly one movement system:
     // a course controller, the armada lane, or unrestricted local-axis flight.
-    if (this.flight.pendingRespawn) this.respawn();
     this.flight.tick(this.run, dt);
+    if (this.flight.pendingRespawn) {
+      if (this.run.mode === 'smuggler') this.input.clear();
+      if (this.flight.respawnDelay > 0) { this.aftermath?.animateAfterDeath(dt, this.camera); return; }
+      this.respawn();
+    }
     this.protection.display(this.flight.protection);
     const run = this.run;
     const look = this.input.consume(dt);
@@ -545,29 +568,30 @@ export class ArcadeGame {
     for (const message of this.messages) message.ttl -= dt;
     this.messages = this.messages.filter(message => message.ttl > 0);
     if (this.bonus) {
-      const health = this.bonus.state.health, points = this.bonus.state.points, fractures = this.bonus.state.fractures, enemyShots = this.bonus.state.enemyShots;
-      const repairs = this.bonus.repairs.collected, haul = this.bonus.state.haul, shield = this.bonus.state.shield;
+      const charge = this.bonus.state.charge;
+      const health = this.bonus.state.health, points = this.bonus.state.points;
+      const shield = this.bonus.state.shield, damage = this.bonus.state.damage;
       this.bonus.step(dt, look, this.camera);
       if (run.mode === 'smuggler') run.elapsed = this.bonus.state.elapsed;
-      if (this.bonus.state.enemyShots > enemyShots) this.sound.enemyShoot('pirate', 100);
       if (this.input.consumeFire()) this.weaponFire.fire({ count: 1, cooldown: weaponSpec(this.bonus.state.family, 1).cooldown }, () => {
         // BonusController emits the entire ray-tested volley, including misses.
         this.sound.shoot(this.bonus!.state.family);
         if (this.bonus!.shoot(this.camera)) this.hitTime = 0.12;
         return true;
       });
+      this.sound.recharged(charge, this.bonus.state.charge);
+      for (const event of this.bonus.sounds.drain()) this.sound.event(event);
       if (this.bonus.state.points !== points) {
-        const delta = this.bonus.state.points - points;
-        if (this.bonus.state.fractures > fractures) this.sound.fracture(); else if (delta > 0) this.sound.pickup();
+        const delta = Math.round((this.bonus.state.points - points) * (run.mode === 'smuggler' && this.bonus.state.kind === 'asteroids' ? 25 : 1));
         this.popupTime = 0.7; this.ui.text('scorePopup', `${delta > 0 ? '+' : ''}${delta}`);
       }
-      const repaired = this.bonus.repairs.collected > repairs;
-      const collectedHaul = this.bonus.state.haul > haul;
-      if (this.bonus.state.notice) { this.log(this.bonus.state.notice); this.bonus.state.notice = ''; if (!repaired && !collectedHaul) this.sound.warning(); }
-      if (repaired || collectedHaul) this.sound.pickup();
-      if (this.bonus.state.health < health || this.bonus.state.shield < shield) {
+      if (this.bonus.state.notice) {
+        this.log(this.bonus.state.notice);
+        this.bonus.state.notice = '';
+      }
+      if (this.bonus.state.health < health || this.bonus.state.shield < shield || this.bonus.state.damage > damage) {
         this.sound.damage(); this.feedbackTime = 1.2;
-        this.ui.text('hitCallout', this.bonus.state.health < health ? 'SKIFF HULL HIT' : this.bonus.state.shield === 0 ? 'SHIELDS DOWN' : 'SHIELD HIT');
+        this.ui.text('hitCallout', this.bonus.state.health < health ? 'SKIFF POINT LOST' : this.bonus.state.damage > damage ? `SKIFF DAMAGE ${this.bonus.state.damage}/100` : this.bonus.state.shield === 0 ? 'SHIELDS DOWN' : 'SHIELD HIT');
         const layer = document.querySelector<HTMLElement>('#damageLayer')!;
         layer.classList.remove('active'); void layer.offsetWidth; layer.classList.add('active');
       }
@@ -593,7 +617,9 @@ export class ArcadeGame {
       this.updateActors(dt);
       if (this.flight.menu || this.flight.pendingRespawn) return;
       if (this.input.consumeFire()) this.shoot();
+      const charge = run.charge;
       this.updateShots(dt);
+      this.sound.recharged(charge, run.charge);
       if (this.flight.menu || this.flight.pendingRespawn) return;
       this.updateCargo(dt);
       this.updateLaw(dt);
@@ -627,7 +653,7 @@ export class ArcadeGame {
     if (!result) return;
     if (result.missCost) { this.ui.text('scorePopup', `MISS -${result.missCost}`); this.popupTime = 0.7; }
     if (this.run.mode === 'invaders') this.log(`WAVE ${this.run.stage} ACCURACY ${accuracyPercent(this.run.accuracy)}%: ${this.run.accuracy.hits} HITS / ${this.run.accuracy.misses} MISSES`);
-    if (result.extraLives) { this.log(`EXTRA LIFE +${result.extraLives}! / ${this.run.lives} LIVES`); this.sound.pickup(); }
+    if (result.extraLives) { this.log(`EXTRA LIFE +${result.extraLives}! / ${this.run.lives} LIVES`); this.sound.cue('extraLife'); }
     this.arrivalTime = 0;
     this.input.clear();
     this.sound.complete(); this.log('MISSION COMPLETE!');
@@ -660,13 +686,15 @@ export class ArcadeGame {
     if (credits === null) return null;
     this.log(`TIME BONUS: ${timeBonusSeconds(this.run)} SEC x ${TIME_BONUS_RATE} = +CR ${credits}`);
     this.ui.text('scorePopup', `+CR ${credits}`); this.popupTime = 1.6;
-    if (credits > 0) this.sound.pickup();
+    if (credits > 0) this.sound.cue('bonusPayment');
     // Save at entry to the warp, not after the animation, to prevent a reload payout.
     this.persist();
     return credits;
   }
   private afterStage(): void {
+    const credits = this.run.pilot.credits;
     const destination = afterGate(this.run);
+    if (this.run.pilot.credits > credits) this.sound.cue('transaction');
     if (destination === 'victory') { this.record(); this.victory(); }
     else if (destination === 'bonusOffer') this.showBonusOffer();
     else if (destination === 'shop') this.showShop();
@@ -679,14 +707,14 @@ export class ArcadeGame {
   }
   private switchWeapon(command: WeaponCommand): void {
     // Do not reset shotDelay here: switching families must not bypass fire-rate limits.
-    if (!this.runState || !this.input.active || this.flight.paused || this.flight.menu || this.warp > 0) return;
+    if (!this.runState || !this.input.active || this.flight.paused || this.flight.menu || this.flight.pendingRespawn || this.warp > 0) return;
     const current = this.bonus?.state.family ?? this.run.family;
     const family = selectWeapon(current, command);
     if (family === current) return;
     if (this.bonus) { this.bonus.state.family = family; if (this.run.mode === 'smuggler') this.run.family = family; }
     else { this.run.family = family; this.run.pilot.weaponLevel = this.run.tiers[family]; }
     this.log(`${family.toUpperCase()} ${this.bonus ? 1 : this.run.tiers[family]} SELECTED`);
-    this.sound.pickup();
+    this.sound.cue('weaponSwitch');
     this.hud();
   }
   private shoot(): void {
@@ -797,7 +825,7 @@ export class ArcadeGame {
     if (decision.type !== 'hit') { this.log('SHIP LOST'); this.handleLifeDecision(decision); }
   }
   private special(): void {
-    if (!this.runState || this.flight.paused || this.flight.menu) return;
+    if (!this.runState || this.flight.paused || this.flight.menu || this.flight.pendingRespawn) return;
     if (this.bonus) {
       const points = this.bonus.state.points;
       if (!this.bonus.blast(this.camera)) { this.log(`BLAST CHARGING ${this.bonus.state.charge}%`); return; }
@@ -832,7 +860,7 @@ export class ArcadeGame {
     this.hudController.update({
       menu: this.flight.menu, profile: this.profile, selectedMode: this.selectedMode, run: this.runState,
       bonus: this.bonus, definition: this.definition, actors: this.actors, throttle: this.input.throttle,
-      recovery: this.recovery, intermission: this.courseIntermission.remaining, arrivalTime: this.arrivalTime, rescued: this.rescued,
+      recovery: this.recovery, intermission: this.courseIntermission.remaining, respawnDelay: this.flight.respawnDelay, arrivalTime: this.arrivalTime, rescued: this.rescued,
       objectiveShip: this.objectiveShip, director: this.director, position: this.bonus ? this.camera.position : this.position,
       orientation: this.bonus ? this.camera.quaternion : this.orientation, messages: this.messages, feedbackTime: this.feedbackTime,
       hitTime: this.hitTime, popupTime: this.popupTime, gate: this.gate, base: this.base,
@@ -850,7 +878,7 @@ export class ArcadeGame {
         lives: this.runState?.lives, continued: this.runState?.continued, credits: this.runState?.pilot.credits, score: this.runState?.pilot.score,
         nextLifeScore: this.runState?.nextLifeScore, stageReward: this.runState?.stageReward,
         accuracy: this.runState ? { ...this.runState.accuracy } : undefined,
-        respawn: { pending: this.flight.pendingRespawn, protection: this.flight.protection },
+        respawn: { pending: this.flight.pendingRespawn, protection: this.flight.protection, delay: this.flight.respawnDelay },
         shield: this.runState?.pilot.shield, hull: this.runState?.pilot.hull, weapon: this.runState?.family, tiers: this.runState?.tiers,
         charge: this.runState?.charge, wanted: this.runState?.pilot.wanted.active, hostileCount: this.hostiles().length,
         attackerCount: this.actors.filter(actor => actor.windup >= 0).length, speedScale: this.definition.speedScale,
@@ -870,7 +898,7 @@ export class ArcadeGame {
         view: { position: this.camera.position.toArray(), orientation: this.camera.quaternion.toArray(), armadaCraftVisible: this.armadaRig?.root.visible ?? false },
         actors: this.actors.map(a => ({ id: a.id, kind: a.kind, role: a.role, hull: a.hull, position: a.object.position.toArray(), velocity: a.object.position.clone().sub(a.previous).multiplyScalar(60).toArray(), radius: a.radius, windup: a.windup, essential: a.essential, drop: a.drop?.type, visible: a.object.visible })),
         shots: this.shots.map(s => ({ faction: s.faction, target: s.target, position: s.object.position.toArray() })),
-        deathTimer: Math.ceil(this.flight.deathCountdown), messageLog: this.messages.map(message => message.text).join('\n'),
+        messageLog: this.messages.map(message => message.text).join('\n'),
         briefingCount: document.querySelector('#modelCount')!.textContent, briefingTitle: document.querySelector('#modelTitle')!.textContent }),
       finishEncounter: () => {
         this.director.drain(); this.rescued = true;
@@ -887,7 +915,7 @@ export class ArcadeGame {
       giveScore: (amount: number) => { this.run.pilot.score += amount; this.checkScoreLives(); },
       lookByMouse: (x: number, y: number) => this.input.injectLook(x, y),
       setStage: (number: number) => { this.run.stage = number; this.run.cleared = false; this.run.phase = 'briefing'; this.run.timeRemaining = STAGE_TIME_LIMIT; this.run.timeBonus = null; this.loadStage(); this.briefing(); },
-      finishBonus: (reason: 'complete' | 'crash' | 'timeout' | 'exit') => this.finishBonus(reason),
+      finishBonus: (reason: NonNullable<BonusRunState['reason']>) => this.finishBonus(reason),
       setBonusPoints: (points: number) => { if (this.bonus) this.bonus.state.points = points; },
       primeBlast: () => { this.run.charge = 100; },
       blast: () => this.special(),

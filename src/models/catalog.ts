@@ -38,7 +38,7 @@ export function createCatalog(): CatalogItem[] {
   ];
   for (const [kind, description] of cargo) items.push({ title: kind === 'shieldCell' ? 'REPAIR CELL' : kind.replace(/([A-Z])/g, ' $1').toUpperCase(), description, create: () => createCargoModel(kind), scale: 3.4, cameraZ: 62 });
   items.push(
-    { title: 'SKIFF SHIELD', description: 'Blue pickup. Repairs one skiff hull point and restores 20 canyon shield. Shooting rocks or canyon crates has a 1 in 15 chance to release one.', create: () => createSkiffRepairModel('shield'), scale: 2.6, cameraZ: 62 },
+    { title: 'SKIFF SHIELD', description: 'Blue pickup. Smuggler Run: +20 shield and repairs 20 damage. Optional sorties: repairs one hull point and adds 20 shield. Shot rocks or canyon crates have a 1 in 15 chance to release one.', create: () => createSkiffRepairModel('shield'), scale: 2.6, cameraZ: 62 },
     { title: 'SKIFF REPAIR', description: 'Pink pickup. Restores all skiff hull and canyon shields. Shooting rocks or canyon guns has a 1 in 30 chance to release one.', create: () => createSkiffRepairModel('repair'), scale: 2.6, cameraZ: 62 },
     { title: 'SUPPLY STATION', description: 'Sell legal cargo here. Mission completion opens the upgrade dock.', create: createBaseModel, scale: 0.45, cameraZ: 86 },
     { title: 'OUTPOST PLANET', description: 'Solid landmark. Canyon bonus sorties use a loan skiff near the surface.', create: () => createPlanetModel(0x6fffbc), scale: 0.44, cameraZ: 96 },

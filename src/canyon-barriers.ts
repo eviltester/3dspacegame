@@ -81,9 +81,9 @@ export class CanyonBarriers {
     item.bounds.setFromCenterAndSize(item.object.position, item.object.scale);
   }
   step(time: number, previous: THREE.Vector3, position: THREE.Vector3, center: THREE.Vector3, offset: THREE.Vector2): number {
+    this.animate(time);
     let impacts = 0;
     for (const item of this.items) {
-      item.previous.copy(item.bounds); this.update(item, time);
       if (sweepCanyonBarrier(previous, position, item.previous, item.bounds) === null) continue;
       // Resolve sideways/upwards, never backwards. Even a boosted head-on hit passes the obstacle.
       const candidates = [new THREE.Vector3(item.bounds.min.x - 3, position.y, position.z),
@@ -97,6 +97,9 @@ export class CanyonBarriers {
       if (!item.collided) { item.collided = true; impacts++; }
     }
     return impacts;
+  }
+  animate(time: number): void {
+    for (const item of this.items) { item.previous.copy(item.bounds); this.update(item, time); }
   }
   hitTime(from: THREE.Vector3, to: THREE.Vector3, radius = 0): number | null {
     let nearest: number | null = null;

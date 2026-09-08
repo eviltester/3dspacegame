@@ -2,29 +2,20 @@
  * Original short arcade sound phrases, synthesized locally without audio files.
  * synthesizeEffect is browser-independent; SoundBank handles Web Audio playback.
  */
-import type { Faction } from './logic';
 import type { WeaponFamily } from './arcade';
-
-type Wave = 'pulse' | 'triangle' | 'noise' | 'metal';
-interface Voice {
-  // notes are frequency steps in Hz (0 is silence), not MIDI notes. start/duration
-  // are seconds; duty changes pulse timbre and gated leaves gaps between steps.
-  wave: Wave;
-  notes: number[];
-  level: number;
-  duty?: number;
-  start?: number;
-  duration?: number;
-  decay?: number;
-  gated?: boolean;
-}
-interface Effect {
-  duration: number;
-  voices: Voice[];
-}
+import type { Effect } from './audio/effect-types';
+import { FEEDBACK_EFFECTS } from './audio/feedback-effects';
+import { FIRING_EFFECTS } from './audio/firing-effects';
+import type { FeedbackCue, ShipVoice, SoundEvent } from './audio/events';
 
 // Short, clocked phrases: pulse channels and shift-register noise, like an arcade sound board.
 const EFFECTS = {
+  ...FEEDBACK_EFFECTS,
+  ...FIRING_EFFECTS,
+  blastReady: { duration: 0.52, voices: [
+    { wave: 'triangle', notes: [520, 1040, 1560, 0, 2080, 2080], level: 0.65, gated: true, decay: 0.3 },
+    { wave: 'pulse', notes: [260, 520, 780], duty: 0.125, level: 0.18, start: 0.26, duration: 0.26, decay: 1 }
+  ] },
   shatter: { duration: 0.23, voices: [
     { wave: 'noise', notes: [11000, 7200, 0, 5400, 2400, 900], level: 0.5, decay: 3.8, gated: true },
     { wave: 'metal', notes: [1560, 780, 390, 130], level: 0.2, duration: 0.16, decay: 4 }
@@ -69,12 +60,14 @@ const EFFECTS = {
   pickup: { duration: 0.2, voices: [
     { wave: 'pulse', notes: [880, 0, 1760], duty: 0.25, level: 0.32, gated: true, decay: 0.8 }
   ] },
+  // One low impact with a fast decay, not a repeated or rising reward phrase.
+  miss: { duration: 0.13, voices: [
+    { wave: 'triangle', notes: [110, 85, 65, 50], level: 0.75, decay: 5 },
+    { wave: 'noise', notes: [650, 350, 160], level: 0.12, duration: 0.04, decay: 5 }
+  ] },
   explosion: { duration: 0.58, voices: [
     { wave: 'noise', notes: [9000, 6500, 4200, 2400, 1200, 550], level: 0.75, decay: 4.5 },
     { wave: 'triangle', notes: [110, 82, 62, 46], level: 0.48, duration: 0.34, decay: 4 }
-  ] },
-  warning: { duration: 0.4, voices: [
-    { wave: 'pulse', notes: [660, 0, 440, 0, 660], duty: 0.5, level: 0.3, gated: true }
   ] },
   damage: { duration: 0.28, voices: [
     { wave: 'metal', notes: [920, 690, 460, 230], level: 0.46, decay: 4 },
@@ -135,6 +128,7 @@ export function synthesizeEffect(name: SoundEffect): Float32Array {
       }
       const pulse = phase < (voice.duty ?? 0.5) ? 1 : -1;
       const wave = voice.wave === 'noise' ? noise
+        : voice.wave === 'sine' ? Math.sin(phase * Math.PI * 2)
         : voice.wave === 'triangle' ? 1 - 4 * Math.abs(phase - 0.5)
           : voice.wave === 'metal' ? pulse * (metalPhase < 0.5 ? 1 : -1) : pulse;
       const attack = Math.min(1, time / 0.002);
@@ -194,14 +188,25 @@ export class SoundBank {
   shoot(family: WeaponFamily = 'pulse'): void { this.play(family === 'pulse' ? 'shoot' : family); }
   intercept(): void { this.play('intercept', 0.7); }
   blast(): void { this.play('blast'); }
-  enemyShoot(faction: Faction, distance: number): void {
-    const volume = Math.max(0, 1 - distance / 800) * 0.48;
-    if (volume > 0.015) this.play(faction === 'police' ? 'police' : faction === 'trader' ? 'trader' : 'pirate', volume);
+  recharged(before: number, after: number): void {
+    // Edge-triggered, so holding a full charge or resuming cannot repeat the cue.
+    if (before < 100 && after >= 100) this.play('blastReady', 0.95, true);
   }
-  pickup(): void { this.play('pickup', 0.7); }
+  enemyShoot(voice: ShipVoice, distance: number): void {
+    const volume = Math.max(0, 1 - distance / 800) * 0.48;
+    if (volume > 0.015) this.play(voice, volume);
+  }
+  event(event: SoundEvent): void {
+    if (event.type === 'fire') this.enemyShoot(event.voice, event.distance); else this.cue(event.cue);
+  }
+  cue(cue: FeedbackCue): void {
+    const priority = ['extraLife', 'policeDispatch', 'policeScan', 'lockOn', 'exitGate', 'gateMiss'].includes(cue);
+    this.play(cue, cue === 'score' ? 0.4 : cue === 'extraLife' ? 0.95 : 0.75, priority, cue === 'lockOn' ? 0.45 : 0.055);
+  }
+  pickup(): void { this.cue('pickup'); }
+  miss(): void { this.cue('miss'); }
   explosion(distance = 0): void { this.play('explosion', Math.max(0, 1 - distance / 1000)); }
   shatter(distance = 0): void { this.play('shatter', Math.max(0, 1 - distance / 700) * 0.65); }
-  warning(): void { this.play('warning', 0.8); }
   damage(): void { this.play('damage'); }
   warp(): void { this.play('warp', 0.85); }
   reinforcements(): void { this.play('reinforcements', 0.95, true); }
@@ -214,10 +219,10 @@ export class SoundBank {
     this.play('gameOver');
   }
 
-  private play(name: SoundEffect, volume = 1, priority = false): void {
+  private play(name: SoundEffect, volume = 1, priority = false, repeatDelay = 0.055): void {
     if (!this.context || !this.master || this.context.state !== 'running' || volume <= 0) return;
     const now = this.context.currentTime;
-    if (now - (this.lastPlayed.get(name) ?? -Infinity) < 0.055) return;
+    if (now - (this.lastPlayed.get(name) ?? -Infinity) < repeatDelay) return;
     if (this.voices.size >= 14) {
       // Arrival warnings may replace the oldest voice at capacity; routine shots
       // can be dropped. This keeps the important cue audible during a busy battle.

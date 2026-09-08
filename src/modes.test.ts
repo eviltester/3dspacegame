@@ -57,7 +57,7 @@ describe('four independent game modes', () => {
     const profile = freshProfile(), run: Partial<ReturnType<typeof newRun>> = newRun('endless', 123);
     delete run.id; delete run.nextLifeScore; delete run.stageReward;
     const restored = parseProfile(JSON.stringify({ ...profile, checkpoints: { endless: run } }), null).checkpoints.endless!;
-    expect(restored.id).toBe('endless-legacy-123'); expect(restored.nextLifeScore).toBe(5000);
+    expect(restored.id).toBe('endless-legacy-123'); expect(restored.nextLifeScore).toBe(35000);
     expect(restored.stageReward).toBe(0); expect(restored.family).toBe('pulse'); expect(restored.tiers.pulse).toBe(1);
   });
   it('shows all modes, descriptions for every weapon, and separate controls', () => {
@@ -75,7 +75,7 @@ describe('Invaders progression and patterns', () => {
     const run = newRun('invaders', 123); run.cleared = true; run.phase = 'recovery';
     const content = MenuViews.briefing(run, stageDefinition('invaders', 1))[3];
     expect(content).toContain('ship stays in the defensive lane'); expect(content).not.toContain('tractor beam is released');
-    expect(content).toContain('Extra life every 20,000 points');
+    expect(content).toContain('Extra life every 35,000 points');
   });
   it('has only armadas, no bonus detours, fixed fighter health and increasing pressure', () => {
     for (let wave = 1; wave <= 100; wave++) {

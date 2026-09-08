@@ -43,7 +43,7 @@ export function enterBonus(run: RunState) {
   if (!kind || run.bonusStatus !== 'available' || run.phase !== 'bonusOffer') return null;
   run.bonusStatus = 'entered'; run.phase = 'bonus'; return kind;
 }
-export type CourseOutcome = Pick<BonusRunState, 'finished' | 'reason' | 'points' | 'health' | 'difficulty' | 'kind' | 'haul'>;
+export type CourseOutcome = Pick<BonusRunState, 'finished' | 'reason' | 'points' | 'health' | 'shield' | 'damage' | 'difficulty' | 'kind' | 'haul' | 'remaining' | 'flight'>;
 export function settleCourse(run: RunState, state: CourseOutcome, ratio: number) {
   if (!state.finished) return null;
   if (run.mode === 'smuggler') {

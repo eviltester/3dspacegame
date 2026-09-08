@@ -47,9 +47,22 @@ test('touch launch, native pointer capture and portrait/landscape flight control
   await page.locator('[data-action="mode:smuggler"]').tap();
   await page.locator('[data-action="newRun"]').tap(); await page.locator('[data-action="launch"]').tap();
   await page.clock.runFor(50);
+  // Native touch capture on the hold button must survive a long press and release.
+  const boost = page.getByRole('button', { name: 'Boost', exact: true });
+  const box = (await boost.boundingBox())!;
+  const touch = await page.context().newCDPSession(page);
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] });
+  await page.clock.runFor(800);
+  const boostedSpeed = (await game.state()).bonusAsteroids!.speed;
+  expect(boostedSpeed).toBeGreaterThan(72);
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.clock.runFor(100);
+  expect((await game.state()).bonusAsteroids!.speed).toBeLessThan(boostedSpeed);
+  await touch.detach();
   // Arrange the canyon HUD without playing an entire asteroid belt.
   await page.evaluate(() => window.vectorShooterDebug.finishBonus('complete')); await game.step(3.1);
   expect((await game.state()).bonus?.kind).toBe('canyon');
+  await page.evaluate(() => Object.assign(window.vectorShooterDebug.getState().bonus!, { damage: 80, shield: 40, charge: 45 }));
   for (const size of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
     await page.setViewportSize(size); await page.clock.runFor(80); await game.layout();
     await expect(page.locator('#touchThrottle')).toBeHidden();

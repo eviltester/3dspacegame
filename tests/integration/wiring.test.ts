@@ -9,6 +9,157 @@ import * as radar from '../../src/radar';
 
 // Check adapters, not whole flights. Rules and edge cases belong beside their
 // controllers; these cases only verify that the application calls them.
+it.each([1, 2])('stage %s retains a visual-only course during the restart countdown and disposes it on respawn', async stage => {
+  const step = vi.spyOn(BonusController.prototype, 'step');
+  const game = new GameHarness(); await game.start('smuggler');
+  if (stage === 2) { game.debug.setStage(2); await game.action('launch'); }
+  game.step(1 / 60);
+  const course = step.mock.contexts.at(-1)!;
+  if (!(course instanceof BonusController)) throw new Error('Expected active course');
+  const scene = course.root.parent;
+  game.debug.setBonusPoints(8); game.debug.forcePlayerDeath(); game.step(0);
+  const score = game.state().score, position = game.state().view.position;
+  const frozen = structuredClone(course.state);
+  expect(course.root.parent).toBe(scene); expect(game.state().bonus).toBeUndefined();
+  expect(game.text('#lifeLostCountdown')).toBe('RESTART IN 4 SECONDS');
+  game.app.input.firing = true; game.debug.blast(); game.debug.damagePlayer(1000); game.step(1);
+  expect(game.state().view.position).not.toEqual(position); expect(game.state().score).toBe(score);
+  expect(course.state).toEqual(frozen); expect(game.state().lives).toBe(2);
+  expect(game.text('#lifeLostCountdown')).toBe('RESTART IN 3 SECONDS');
+  await game.action('pause'); const paused = game.state().view.position; game.step(20);
+  expect(game.state().view.position).toEqual(paused); expect(game.state().respawn.delay).toBeCloseTo(3);
+  game.debug.persist(); expect(game.debug.getProfile().checkpoints.smuggler?.pilot.score).toBe(score);
+  await game.action('unpause'); game.step(3);
+  expect(game.state().bonus?.finished).toBe(false); expect(game.state().respawn.protection).toBeGreaterThan(2.9);
+  expect(course.root.parent).toBeNull(); expect(course.root.children).toHaveLength(0);
+});
+it('leaving a life-lost countdown disposes its scenery without paying the flight again', async () => {
+  const step = vi.spyOn(BonusController.prototype, 'step');
+  const game = new GameHarness(); await game.start('smuggler'); game.step(1 / 60);
+  const course = step.mock.contexts.at(-1)!;
+  if (!(course instanceof BonusController)) throw new Error('Expected active course');
+  game.debug.setBonusPoints(8); game.debug.forcePlayerDeath(); await game.action('pause'); await game.action('title');
+  expect(course.root.parent).toBeNull(); expect(course.root.children).toHaveLength(0);
+  await game.action('resumeRun'); await game.action('launch');
+  expect(game.state().score).toBe(200); expect(game.state().lives).toBe(2);
+});
+it('pausing a Smuggler life-loss delay does not create a new course before respawn', async () => {
+  const game = new GameHarness(); await game.start('smuggler'); game.debug.forcePlayerDeath(); game.step(1);
+  await game.action('pause'); game.step(20); expect(game.state().bonus).toBeUndefined();
+  await game.action('unpause'); expect(game.state().bonus).toBeUndefined();
+  game.step(2.9); expect(game.state().bonus).toBeUndefined();
+  game.step(0.1); expect(game.state().bonus?.health).toBe(1); expect(game.state().lives).toBe(2);
+});
+it('a missed Smuggler exit shows both penalties, then advances without spending a life', async () => {
+  const game = new GameHarness(); await game.start('smuggler');
+  game.state().bonus!.haul = 4; game.debug.finishBonus('gateMissed'); game.step(0);
+  expect(game.text('#courseAwards')).toContain('MISSED GATE PENALTY -2000');
+  expect(game.text('#courseAwards')).toContain('LOST CARGO PENALTY -2000'); expect(game.text('#courseHaul')).toBe('HAUL 4 LOST / +0');
+  expect(game.state().lives).toBeGreaterThanOrEqual(3);
+  game.step(3.1); expect(game.state().stage).toBe(2); expect(game.state().bonus?.kind).toBe('canyon');
+});
+it('Smuggler passes live skiff condition through both course handoffs, pause, save and respawn', async () => {
+  const game = new GameHarness(); await game.start('smuggler');
+  Object.assign(game.state().bonus!, { health: 1, shield: 40, damage: 60 });
+  game.debug.finishBonus('complete'); game.step(3.05);
+  expect(game.state().bonus).toMatchObject({ kind: 'canyon', health: 1, shield: 40, damage: 60 });
+  await game.action('pause'); const remaining = game.state().bonus!.remaining;
+  game.step(5); expect(game.state().bonus!.remaining).toBe(remaining);
+  game.debug.persist(); expect(game.debug.getProfile().checkpoints.smuggler?.skiff).toEqual({ health: 1, shield: 40, damage: 60 });
+  await game.action('unpause'); game.debug.finishBonus('complete'); game.step(3.05);
+  expect(game.state().bonus).toMatchObject({ kind: 'asteroids', health: 1, shield: 40, damage: 60 });
+  game.debug.forcePlayerDeath(); game.step(3.9);
+  expect(game.state().bonus).toBeUndefined(); expect(game.text('#lifeLostLives')).toContain('LIVES LEFT');
+  game.step(0.1);
+  expect(game.state().bonus).toMatchObject({ health: 1, shield: 100, damage: 0 });
+});
+it('saved mouse sensitivity initializes flight input and the control slider changes it immediately', async () => {
+  const game = new GameHarness(); await game.action('controls');
+  const slider = document.querySelector<HTMLInputElement>('#mouseSensitivity')!;
+  slider.value = '1.7'; slider.dispatchEvent(new Event('input', { bubbles: true }));
+  expect(game.app.input.mouseSensitivity).toBe(1.7);
+  expect(game.text('#mouseValue')).toBe('1.7x');
+  const reloaded = new GameHarness(); expect(reloaded.app.input.mouseSensitivity).toBe(1.7);
+});
+it('held boost reaches the asteroid and canyon controllers and release returns toward automatic speed', async () => {
+  const game = new GameHarness(); await game.start('smuggler');
+  for (const kind of ['asteroids', 'canyon']) {
+    expect(game.state().bonus?.kind).toBe(kind);
+    game.app.input.setBoostHeld(true); game.step(0.8);
+    const boosted = game.state().bonusAsteroids?.speed ?? game.state().bonusCourse!.speed;
+    expect(boosted).toBeGreaterThan(72);
+    game.app.input.setBoostHeld(false); game.step(0.1);
+    expect(game.state().bonusAsteroids?.speed ?? game.state().bonusCourse!.speed).toBeLessThan(boosted);
+    if (kind === 'asteroids') { game.debug.finishBonus('complete'); game.step(3.05); }
+  }
+});
+it.each([
+  [1, false], [1, true], [2, false], [2, true]
+])('Smuggler stage %s plays a thud for a missed shot, including partial hits (%s)', async (stage, partialHit) => {
+  const game = new GameHarness(); await game.start('smuggler');
+  if (stage === 2) { game.debug.setStage(2); await game.action('launch'); }
+  const cue = vi.spyOn(game.app.sound, 'cue');
+  vi.spyOn(BonusController.prototype, 'shoot').mockImplementation(function (this: BonusController) {
+    this.state.notice = 'SHOT MISSED -50'; this.sounds.cue('miss'); return !!partialHit;
+  });
+  game.app.input.firing = true; game.step(1 / 60); game.app.input.firing = false;
+  game.step(1 / 60);
+  expect(cue).toHaveBeenCalledExactlyOnceWith('miss');
+  expect(game.text('#messageLog')).toContain('SHOT MISSED -50');
+});
+it('log text alone cannot accidentally play a warning or reward', async () => {
+  const game = new GameHarness(); await game.start('smuggler');
+  const cue = vi.spyOn(game.app.sound, 'cue');
+  game.state().bonus!.notice = 'SHIELDS DOWN'; game.step(1 / 60);
+  expect(cue).not.toHaveBeenCalled();
+});
+it('course feedback reaches playback once, preserving simultaneous voices and independent cues', async () => {
+  const game = new GameHarness(); await game.start('smuggler');
+  const cue = vi.spyOn(game.app.sound, 'cue'), fire = vi.spyOn(game.app.sound, 'enemyShoot');
+  vi.spyOn(BonusController.prototype, 'shoot').mockImplementationOnce(function (this: BonusController) {
+    this.sounds.fire('police', 120); this.sounds.fire('pirate', 200); this.sounds.fire('canyonGun', 80);
+    this.sounds.cue('pickup'); this.sounds.cue('score'); this.sounds.cue('penaltyCleared');
+    this.state.notice = 'ANY DISPLAY WORDING'; return true;
+  });
+  game.app.input.firing = true; game.step(1 / 60); game.app.input.firing = false; game.step(1 / 60);
+  expect(fire.mock.calls).toEqual([['police', 120], ['pirate', 200], ['canyonGun', 80]]);
+  expect(cue.mock.calls).toEqual([['pickup'], ['score'], ['penaltyCleared']]);
+});
+it('weapon switching and Invaders extra lives never use the pickup chime', async () => {
+  const game = new GameHarness(); await game.start('invaders');
+  const cue = vi.spyOn(game.app.sound, 'cue');
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+  expect(cue).toHaveBeenCalledExactlyOnceWith('weaponSwitch'); cue.mockClear();
+  game.debug.giveScore(35000);
+  expect(cue).toHaveBeenCalledExactlyOnceWith('extraLife'); cue.mockClear();
+  game.debug.giveScore(1); expect(cue).not.toHaveBeenCalled();
+});
+it('Smuggler payout and extra life announce independently, without replaying a paid result', async () => {
+  const game = new GameHarness(); await game.start('smuggler'); game.debug.giveScore(34999);
+  const cue = vi.spyOn(game.app.sound, 'cue');
+  game.debug.finishBonus('complete');
+  expect(cue.mock.calls).toEqual([['extraLife'], ['bonusPayment']]); cue.mockClear();
+  game.debug.finishBonus('complete'); expect(cue).not.toHaveBeenCalled();
+});
+it('docking cargo sales and shop purchases use transaction audio, with separate gate-bonus payment', async () => {
+  const game = new GameHarness(); await game.start(); game.debug.grantCargo('legalCargo', 2);
+  game.debug.finishEncounter();
+  const cue = vi.spyOn(game.app.sound, 'cue');
+  game.debug.reachGate(); game.step(2);
+  expect(game.state().menu).toBe('shop');
+  expect(cue.mock.calls).toEqual([['bonusPayment'], ['transaction']]); cue.mockClear();
+  await game.action('buy:magnet'); expect(cue).toHaveBeenCalledExactlyOnceWith('transaction');
+});
+it('course shooting reports the charge transition to the ready-sound adapter once', async () => {
+  const game = new GameHarness(); await game.start('smuggler');
+  const ready = vi.spyOn(game.app.sound, 'recharged');
+  vi.spyOn(BonusController.prototype, 'shoot').mockImplementation(function (this: BonusController) { this.state.charge = 100; return true; });
+  game.state().bonus!.charge = 95;
+  game.app.input.firing = true; game.step(1 / 60);
+  expect(ready).toHaveBeenCalledWith(95, 100);
+  game.step(0.5);
+  expect(ready.mock.calls.filter(([before, after]) => before < 100 && after === 100)).toHaveLength(1);
+});
 it.each(['journey', 'endless', 'invaders', 'smuggler'] as const)('%s consumes touch steering, fire and weapon selection without pointer lock', async mode => {
   const game = new GameHarness();
   await game.action('controls'); await game.action('controls:touch'); await game.action('title'); await game.start(mode);
@@ -65,7 +216,7 @@ it('saving and respawning a Smuggler flight retain the displayed score without a
   await game.action('pause'); game.debug.persist(); game.debug.persist();
   expect(game.debug.getProfile().checkpoints.smuggler?.pilot.score).toBe(1200);
   expect(game.state().score).toBe(1000);
-  await game.action('unpause'); game.debug.forcePlayerDeath(); game.step(1 / 60);
+  await game.action('unpause'); game.debug.forcePlayerDeath(); game.step(4.01);
   expect(game.state().lives).toBe(2); expect(game.state().score).toBe(1200);
   expect(game.text('#arcadeScore')).toBe('001200');
   game.debug.persist(); expect(game.debug.getProfile().checkpoints.smuggler?.pilot.score).toBe(1200);
@@ -144,7 +295,8 @@ it('Smuggler shows score and lives for three seconds, preserves mouse ownership,
   game.debug.setBonusPoints(40); game.debug.finishBonus('complete'); game.step(0);
   const score = game.state().score;
   expect(game.state().menu).toBe(''); expect(game.state().phase).toBe('cleared');
-  expect(game.text('#courseScore')).toBe('SCORE 2300'); expect(game.text('#courseLives')).toBe('LIVES 3');
+  expect(game.text('#courseScore')).toBe(`SCORE ${score}`); expect(game.text('#courseLives')).toBe(`LIVES ${game.state().lives}`);
+  expect(game.text('#courseAwards')).toContain('CLEAN FINISH BONUS +3000');
   expect(document.querySelector<HTMLElement>('#courseSummary')!.hidden).toBe(false);
   expect(document.pointerLockElement).toBe(document.querySelector('#viewport canvas'));
   game.step(1); await game.action('pause'); game.step(10); expect(game.state().stage).toBe(1);
@@ -176,7 +328,8 @@ it('canyon cargo, shields and the paid haul breakdown reach the HUD through the 
   expect(game.text('#cargoReadout')).toBe('HAUL 2 / +150 AT EXIT'); expect(game.text('#shieldReadout')).toBe('40 / 100');
   expect(game.state().score).toBe(0);
   game.debug.finishBonus('complete'); game.step(0);
-  expect(game.text('#courseHaul')).toBe('HAUL 2 x 75 = +150'); expect(game.text('#courseScore')).toBe('SCORE 1450');
+  const score = game.state().score;
+  expect(game.text('#courseHaul')).toBe('HAUL 2 x 75 = +150'); expect(game.text('#courseScore')).toBe(`SCORE ${score}`);
   expect(game.debug.getProfile().checkpoints.smuggler?.stageHaul).toBe(2);
-  game.step(3.1); expect(game.state().stage).toBe(3); expect(game.state().score).toBe(1450);
+  game.step(3.1); expect(game.state().stage).toBe(3); expect(game.state().score).toBe(score);
 });

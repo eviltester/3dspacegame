@@ -32,7 +32,7 @@ it('raises density, flight and motion smoothly, while preserving attack warning 
     for (const key of ['asteroidRows', 'canyonObstacles', 'flightScale', 'motionScale', 'targetCount'] as const) expect(b[key]).toBeGreaterThan(a[key]);
     expect(b.targetMinRadius).toBeLessThan(a.targetMinRadius);
     expect(b.shotSpeedScale).toBeLessThanOrEqual(1.35); expect(b.gunCooldown).toBeGreaterThanOrEqual(1.5);
-    expect(canyonSpeed(0.5, true, level)).toBeCloseTo(canyonSpeed(0.5, false, level) * 1.5);
+    expect(canyonSpeed(0.5, level)).toBeCloseTo(96 * bonusProfile(level).flightScale);
     expect(asteroidFlight(0, level).speed).toBeGreaterThan(asteroidFlight(0, level - 1).speed);
   }
   expect(CANYON_GUN_WARNING).toBeGreaterThanOrEqual(0.7); expect(CANYON_MAX_BOLTS).toBe(24);

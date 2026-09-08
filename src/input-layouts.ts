@@ -9,6 +9,7 @@ export const KEYBOARD_LOOK_RATE = 520;
 export function tiltSensitivity(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0.5, Math.min(2, value)) : 1;
 }
+export const mouseSensitivity = tiltSensitivity;
 
 interface ControlLayout {
   name: string;
@@ -64,7 +65,7 @@ export function flightControls(scheme: ControlScheme): string {
 }
 
 export function boostControls(scheme: ControlScheme): string {
-  return scheme === 'touch' ? 'Use the on-screen Boost button.' : 'Shift or wheel forward boosts.';
+  return scheme === 'touch' ? 'Hold the on-screen Boost button to accelerate.' : 'Hold Shift or wheel forward to accelerate with boost.';
 }
 export function pauseControls(scheme: ControlScheme): string {
   return scheme === 'touch' ? 'Use the on-screen Pause button.' : 'Esc pauses.';

@@ -12,14 +12,19 @@ import { CanyonCourse } from './canyon';
 import type { CanyonEnd } from './canyon';
 import { CANYON_GATE_BRIEF } from './canyon-gates';
 import { SkiffRepairDrops } from './bonus-repairs';
-import { CANYON_COMBAT_BRIEF, CANYON_MAX_SHIELD, CANYON_REPAIR_BRIEF, canyonTargetPoints, damageCanyonSkiff, repairedCanyonShield } from './canyon-combat';
-import type { CanyonImpact } from './canyon-combat';
+import { CANYON_COMBAT_BRIEF, CANYON_MAX_SHIELD, CANYON_REPAIR_BRIEF, canyonTargetPoints } from './canyon-combat';
+import { damageSkiff, parseSkiff } from './skiff-vitals';
+import type { SkiffVitals, SkiffImpact } from './skiff-vitals';
+import { parseSmugglerFlight, smugglerTimeLimit } from './smuggler-rewards';
+import type { SmugglerFlight } from './smuggler-rewards';
+import { BoostDrive } from './boost';
 import { CanyonHaul } from './canyon-haul';
 import { AsteroidTraffic } from './asteroid-traffic';
 import { courseRadarContacts } from './course-radar';
 import { crossedGate, Random } from './encounters';
 import { ASTEROID_COLORS, createBoltModel, createCargoModel, createPulseRing, createTextSprite, disposeObject, edgesFromGeometry, lineShape } from './models';
 import { sweptHit, weaponSpec } from './weapons';
+import { SoundEvents } from './audio/events';
 
 export interface BonusRunState {
   kind: BonusKind;
@@ -29,6 +34,7 @@ export interface BonusRunState {
   remaining: number;
   health: number;
   shield: number;
+  damage: number;
   haul: number;
   charge: number;
   // Canyon/target points are score units; asteroid points are salvage units.
@@ -43,6 +49,7 @@ export interface BonusRunState {
   notice: string;
   fractures: number;
   enemyShots: number;
+  flight: SmugglerFlight;
 }
 interface AsteroidMotion { size: 0 | 1 | 2; color: number; velocity: THREE.Vector3; previous: THREE.Vector3; age: number; grace: number; spin: number }
 interface MarkerMotion { home: THREE.Vector3; phase: number; direction: number; amplitude: THREE.Vector2 }
@@ -70,12 +77,13 @@ export function bonusBrief(kind: BonusKind, difficulty: number, scheme: ControlS
   const details = kind === 'sequence' ? `${profile.targetCount} targets. Shoot 1 to ${profile.targetCount}.`
     : kind === 'asteroids' ? `${profile.asteroidRows} rock formations. Speed ${Math.round(48 * profile.flightScale)} to ${Math.round(112 * profile.flightScale)}.`
       : `${profile.canyonObstacles} obstacles / ${Math.ceil(profile.canyonObstacles / 2)} guns. Speed ${Math.round(48 * profile.flightScale)} to ${Math.round(144 * profile.flightScale)}, plus boost.`;
-  return `${details} ${BONUS_BRIEFS[kind]} ${kind === 'canyon' ? boostControls(scheme) + ' ' : ''}${flightControls(scheme)} ${pauseControls(scheme)} Choose Exit Bonus to leave safely.`;
+  return `${details} ${BONUS_BRIEFS[kind]} ${kind !== 'sequence' ? boostControls(scheme) + ' ' : ''}${flightControls(scheme)} ${pauseControls(scheme)} Choose Exit Bonus to leave safely.`;
 }
 
 export class BonusController {
   // Everything temporary is attached beneath root for hiding/disposal as one course.
   readonly root = new THREE.Group();
+  readonly sounds = new SoundEvents();
   readonly state: BonusRunState;
   readonly path: THREE.CatmullRomCurve3;
   readonly canyon?: CanyonCourse;
@@ -92,30 +100,42 @@ export class BonusController {
   private asteroidGate: BonusObject | null = null;
   private rockColorIndex = 0;
   private exitAnnounced = false;
+  private readonly asteroidBoost = new BoostDrive(0.65);
+  private boostedTravel = 0;
+  private boosting = false;
+  private get travelTime(): number { return this.state.elapsed + this.boostedTravel; }
   private collisionDelay = 0;
   private canyonImpactDelay = 0;
   protect(seconds: number): void { this.collisionDelay = Math.max(this.collisionDelay, seconds); }
   private blastEffect: { object: THREE.LineSegments; life: number; direction: THREE.Vector3 } | null = null;
   private bolts: Array<{ object: THREE.Object3D; direction: THREE.Vector3; speed: number; life: number }> = [];
   private previous = new THREE.Vector3();
+  private drift = new THREE.Vector3();
+  private aftermathTime = 0;
   private readonly profile;
-  constructor(kind: BonusKind, seed: number, difficulty = 1) {
+  private readonly routeDuration: number;
+  constructor(kind: BonusKind, seed: number, difficulty = 1, private readonly smuggler = false, vitals?: SkiffVitals, audit?: SmugglerFlight | null) {
     const profile = this.profile = bonusProfile(difficulty);
     const duration = kind === 'asteroids' ? ASTEROID_DURATION / profile.flightScale : kind === 'canyon' ? 75 : 60;
-    this.state = { kind, family: 'pulse', elapsed: 0, duration, remaining: duration, health: 3, shield: kind === 'canyon' ? CANYON_MAX_SHIELD : 0, haul: 0, charge: 100, points: 0,
-      difficulty: profile.level, targetCount: profile.targetCount, shotsFired: 0, nextMarker: 1, finished: false, reason: null, notice: '', fractures: 0, enemyShots: 0 };
+    this.routeDuration = duration;
+    this.state = { kind, family: 'pulse', elapsed: 0, duration, remaining: duration,
+      ...parseSkiff(vitals ?? { health: 3, shield: smuggler || kind === 'canyon' ? CANYON_MAX_SHIELD : 0, damage: 0 }, smuggler), haul: 0, charge: 100, points: 0,
+      difficulty: profile.level, targetCount: profile.targetCount, shotsFired: 0, nextMarker: 1, finished: false, reason: null, notice: '', fractures: 0, enemyShots: 0,
+      flight: { ...parseSmugglerFlight(audit), gatesPassed: 0, topBoost: false } };
     const rng = this.rng = new Random(seed);
     // Keep pickup rolls separate from route/fragment randomness for reproducible layouts.
     const repairRng = new Random(seed ^ 0x51f15e);
-    this.repairs = new SkiffRepairDrops(this.root, () => repairRng.next());
+    this.repairs = new SkiffRepairDrops(this.root, () => repairRng.next(), smuggler);
     const haulRng = new Random(seed ^ 0x4a117);
     this.cargo = new CanyonHaul(this.root, () => haulRng.next());
     if (kind === 'canyon') {
       // CanyonCourse handles its path, gates and gunfire; this wrapper supplies the
       // common weapon, three-hit health and completion interface used by all courses.
-      this.canyon = new CanyonCourse(this.root, seed, profile.level); this.path = this.canyon.path;
+      this.canyon = new CanyonCourse(this.root, seed, profile.level, smuggler, this.sounds); this.path = this.canyon.path;
       this.objects.push(...this.canyon.targets); this.state.remaining = this.canyon.remaining;
-      this.state.duration = this.state.remaining; return;
+      this.state.flight.enemies = true;
+      this.state.duration = smuggler ? smugglerTimeLimit(this.state.remaining) : this.state.remaining;
+      this.state.remaining = Math.max(0, this.state.duration - this.state.flight.elapsed); return;
     }
     const points = Array.from({ length: 17 }, (_, index) => new THREE.Vector3(0, 0, -index * ASTEROID_LENGTH / 16));
     this.path = new THREE.CatmullRomCurve3(points);
@@ -140,7 +160,7 @@ export class BonusController {
           amplitude: new THREE.Vector2(17 - radius - profile.targetJitter, 15 - radius - profile.targetJitter) };
       }
     } else {
-      this.traffic = new AsteroidTraffic(this.root, seed, profile.level);
+      this.traffic = new AsteroidTraffic(this.root, seed, profile.level, smuggler, this.sounds);
       for (let i = 1; i <= profile.asteroidRows; i += 1) {
         const row = i * 55 / profile.asteroidRows, t = row / 58;
         const center = this.path.getPoint(t);
@@ -169,6 +189,11 @@ export class BonusController {
       gate.add(lineShape([[0, radius + 14, 4], [0, radius + 2, 4], [-4, radius + 6, 4], [4, radius + 6, 4]], [[0, 1], [1, 2], [1, 3]], 0xffff70));
       gate.position.set(gap.x, gap.y, -ASTEROID_LENGTH);
       this.asteroidGate = this.add('gate', gate, radius);
+      this.state.flight.enemies ||= this.traffic.ships.length > 0;
+    }
+    if (smuggler) {
+      this.state.duration = smugglerTimeLimit(duration);
+      this.state.remaining = Math.max(0, this.state.duration - this.state.flight.elapsed);
     }
   }
   private add(kind: BonusObject['kind'], object: THREE.Object3D, radius: number, number = 0): BonusObject {
@@ -204,6 +229,7 @@ export class BonusController {
       this.addRock(position, radius, size, velocity, rock.color);
     }
     this.state.fractures++;
+    this.sounds.cue('fracture');
   }
   get rocks() {
     return this.objects.filter(item => !item.used && item.rock).map(item => ({ id: item.object.id, size: item.rock!.size,
@@ -221,23 +247,32 @@ export class BonusController {
   }
   get asteroidRun() {
     if (!this.asteroidGate) return undefined;
-    return { ...asteroidFlight(this.state.elapsed, this.state.difficulty), gate: { position: this.asteroidGate.object.position.toArray(), radius: this.asteroidGate.radius },
+    const flight = asteroidFlight(this.travelTime, this.state.difficulty);
+    return { ...flight, speed: flight.speed * (1 + this.asteroidBoost.amount), boosting: this.boosting, gate: { position: this.asteroidGate.object.position.toArray(), radius: this.asteroidGate.radius },
       exitApproach: this.exitAnnounced, ships: this.traffic?.snapshot ?? [] };
   }
   step(dt: number, look: { x: number; y: number; boost?: boolean }, camera: THREE.PerspectiveCamera): void {
     if (this.state.finished) return;
     this.state.elapsed += dt;
+    this.state.flight.elapsed += dt;
     this.state.remaining = Math.max(0, this.state.remaining - dt);
     this.collisionDelay = Math.max(0, this.collisionDelay - dt);
     this.canyonImpactDelay = Math.max(0, this.canyonImpactDelay - dt);
     this.previous.copy(camera.position);
     if (this.canyon) {
+      const missed = this.canyon.missed;
       const events = this.canyon.step(dt, look, camera);
-      this.state.remaining = this.canyon.remaining;
+      if (!this.smuggler) this.state.remaining = this.canyon.remaining;
+      this.state.flight.gatesPassed = this.canyon.passed;
+      this.state.flight.gatesMissed += this.canyon.missed - missed;
+      this.state.flight.topBoost = this.canyon.topBoost;
       this.state.points += events.points; this.state.enemyShots += events.shots;
       if (events.notice) this.state.notice = events.notice;
-      if (events.end) this.finish(events.end);
-      else for (const source of events.damage) this.damage(source);
+      for (const source of events.damage) this.damage(source);
+      if (events.end) {
+        if (events.end === 'wall') this.state.flight.crashes++;
+        this.finish(this.smuggler && events.end === 'wall' ? 'gateMissed' : events.end);
+      }
     } else if (this.state.kind === 'sequence') {
       // Delay motion until the first correct hit so the player can recognize the
       // field, then ease toward faster movement as the sequence is completed.
@@ -251,18 +286,29 @@ export class BonusController {
       camera.position.set(0, 0, 0);
       camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
     } else {
+      this.boosting = look.boost === true;
+      this.asteroidBoost.step(dt, 1, this.boosting);
+      // Extra travelled time accelerates the route and exit, not enemy animations or real elapsed time.
+      this.boostedTravel += dt * this.asteroidBoost.amount;
+      if (!this.smuggler) this.state.remaining = Math.max(0, this.routeDuration - this.travelTime);
+      this.state.flight.topBoost = this.boosting && this.asteroidBoost.amount >= 0.5 - 1e-6;
       this.offset.x = THREE.MathUtils.clamp(this.offset.x + look.x * 0.13, -38, 38);
       this.offset.y = THREE.MathUtils.clamp(this.offset.y - look.y * 0.13, -24, 30);
-      const t = asteroidFlight(this.state.elapsed, this.state.difficulty).progress;
+      const t = asteroidFlight(this.travelTime, this.state.difficulty).progress;
       const position = this.path.getPointAt(t);
       camera.position.copy(position).add(new THREE.Vector3(this.offset.x, this.offset.y, 0));
       camera.lookAt(camera.position.clone().add(new THREE.Vector3(0, 0, -1)));
       camera.rotateZ(-this.offset.x * 0.002);
-      if (!this.exitAnnounced && t >= 0.75) { this.exitAnnounced = true; this.state.notice = 'EXIT GATE AHEAD / FLY THROUGH THE OPENING'; }
+      if (!this.exitAnnounced && t >= 0.75) { this.exitAnnounced = true; this.sounds.cue('exitGate'); this.state.notice = 'EXIT GATE AHEAD / FLY THROUGH THE OPENING'; }
       const traffic = this.traffic?.step(dt, this.state.elapsed, this.previous, camera.position);
       if (traffic?.notice && !this.exitAnnounced) this.state.notice = traffic.notice;
-      if (traffic) for (let i = 0; i < traffic.impacts; i++) this.damage();
+      if (traffic) {
+        this.state.enemyShots += traffic.shots;
+        for (let i = 0; i < traffic.impacts; i++) this.damage('ship');
+        for (let i = 0; i < traffic.hits; i++) this.damage('gun');
+      }
     }
+    this.drift.copy(camera.position).sub(this.previous).divideScalar(dt);
     for (const item of this.objects) {
       if (item.used || this.canyon || item.kind === 'gate') continue;
       if (item.rock) {
@@ -293,8 +339,12 @@ export class BonusController {
         });
       } else if (sweptHit(this.previous, camera.position, item.rock?.previous ?? item.object.position, item.object.position, item.radius + 2) !== null) {
         this.consume(item);
-        if (item.kind === 'rock' || item.kind === 'turret') this.damage();
-        else this.state.points += 3;
+        if (item.kind === 'rock') this.damage(item.rock?.size === 2 ? 'largeRock' : item.rock?.size === 1 ? 'mediumRock' : 'smallRock');
+        else if (item.kind === 'turret') this.damage('collision');
+        else {
+          if (this.smuggler) this.state.haul++; else this.state.points += 3;
+          this.sounds.cue('pickup');
+        }
       }
     }
     this.objects = this.objects.filter(item => {
@@ -302,14 +352,40 @@ export class BonusController {
       this.root.remove(item.object); disposeObject(item.object); return false;
     });
     if (!this.state.finished) {
-      this.state.health = this.repairs.step(dt, this.previous, camera.position, this.state.health);
+      const repairs = this.repairs.collected;
+      Object.assign(this.state, this.repairs.step(dt, this.previous, camera.position, this.state));
+      if (this.repairs.collected > repairs) this.sounds.cue('pickup');
       if (this.repairs.notice) this.state.notice = this.repairs.notice;
       if (this.canyon) {
-        for (const kind of this.repairs.collectedThisStep) this.state.shield = repairedCanyonShield(this.state.shield, kind);
         const collected = this.cargo.step(dt, this.previous, camera.position);
-        if (collected) { this.state.haul += collected; this.state.notice = `HAUL +${collected} / CARRYING ${this.state.haul}`; }
+        if (collected) { this.state.haul += collected; this.sounds.cue('pickup'); this.state.notice = `HAUL +${collected} / CARRYING ${this.state.haul}`; }
       }
     }
+    this.animateWeapons(dt);
+    if (this.smuggler) this.state.remaining = Math.max(0, this.state.duration - this.state.flight.elapsed);
+    if (this.asteroidGate && this.travelTime >= this.routeDuration) {
+      const gate = this.asteroidGate;
+      this.finish(crossedGate(this.previous, camera.position, gate.object.position, gate.object.quaternion, gate.radius * Math.cos(Math.PI / 8) - 2) ? 'complete' : 'gateMissed');
+    } else if (!this.canyon && this.state.kind === 'sequence' && this.state.remaining <= 0) this.finish('timeout');
+  }
+  /** The destroyed craft coasts to rest; only scenery moves, never flight rules. */
+  animateAfterDeath(dt: number, camera: THREE.PerspectiveCamera): void {
+    if (!this.state.finished || !Number.isFinite(dt) || dt <= 0) return;
+    this.aftermathTime += dt;
+    const decay = Math.exp(-1.5 * dt);
+    camera.position.addScaledVector(this.drift, (1 - decay) / 1.5);
+    this.drift.multiplyScalar(decay);
+    for (const item of this.objects) {
+      if (item.used || !item.rock) continue;
+      item.object.position.addScaledVector(item.rock.velocity, dt);
+      item.object.rotation.x += item.rock.spin * dt;
+      item.object.rotation.y += item.rock.spin * dt * 0.7;
+    }
+    this.canyon?.animateAfterDeath(dt, camera);
+    this.traffic?.step(dt, this.state.elapsed + this.aftermathTime, camera.position, camera.position, false);
+    this.animateWeapons(dt);
+  }
+  private animateWeapons(dt: number): void {
     for (const bolt of this.bolts) { bolt.life -= dt; bolt.object.position.addScaledVector(bolt.direction, bolt.speed * dt); }
     this.bolts = this.bolts.filter(bolt => { if (bolt.life > 0) return true; this.root.remove(bolt.object); disposeObject(bolt.object); return false; });
     if (this.blastEffect) {
@@ -320,22 +396,19 @@ export class BonusController {
       (effect.object.material as THREE.LineBasicMaterial).opacity = effect.life / 0.65;
       if (effect.life === 0) { this.root.remove(effect.object); disposeObject(effect.object); this.blastEffect = null; }
     }
-    if (this.asteroidGate && this.state.elapsed >= this.state.duration) {
-      const gate = this.asteroidGate;
-      this.finish(crossedGate(this.previous, camera.position, gate.object.position, gate.object.quaternion, gate.radius * Math.cos(Math.PI / 8) - 2) ? 'complete' : 'gateMissed');
-    } else if (!this.canyon && this.state.kind === 'sequence' && this.state.remaining <= 0) this.finish('timeout');
   }
   shoot(camera: THREE.PerspectiveCamera): boolean {
     if (this.state.finished) return false;
     this.state.shotsFired++;
+    this.state.flight.shots++;
     if (this.state.kind === 'sequence') this.state.points -= TARGET_SHOT_COST;
     const spec = weaponSpec(this.state.family, 1);
     const forward = camera.getWorldDirection(new THREE.Vector3());
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
     // Course fire resolves hits immediately by ray, with traveling bolts as visuals.
     // Snapshot targets before firing so a volley cannot also hit fragments it creates.
-    const candidates: BonusObject[] = [...this.objects, ...(this.canyon?.shots ?? []), ...(this.traffic?.ships ?? [])]
-      .filter(item => !item.used && item.kind !== 'gate' && item.kind !== 'salvage' && item.kind !== 'police');
+    const candidates: BonusObject[] = [...this.objects, ...(this.canyon?.shots ?? []), ...(this.traffic?.ships ?? []), ...(this.traffic?.fire.shots ?? [])]
+      .filter(item => !item.used && item.kind !== 'gate' && item.kind !== 'salvage' && (item.kind !== 'police' || this.smuggler));
     let confirmed = false, wrongMarker = false, targetHit = false, misses = 0;
     for (let index = 0; index < spec.count; index++) {
       const direction = forward.clone().applyAxisAngle(up, (index - (spec.count - 1) / 2) * spec.spread);
@@ -351,13 +424,14 @@ export class BonusController {
       this.bolts.push({ object: bolt, direction, speed: spec.speed, life: Math.min(0.7, Math.max(0, range - 10) / spec.speed) });
       let boltHit = false;
       for (const { item } of targets.slice(0, spec.pierce)) {
+        const points = this.state.points;
         if (item.kind === 'marker') {
           if (item.number !== this.state.nextMarker) { wrongMarker = true; continue; }
           this.state.nextMarker += 1;
           this.state.points += TARGET_HIT_POINTS; this.consume(item);
           if (this.state.nextMarker > this.state.targetCount) this.finish('complete');
         } else if (item.kind === 'hostileBolt') {
-          this.state.points += canyonTargetPoints('hostileBolt');
+          this.state.points += canyonTargetPoints('hostileBolt') / (this.state.kind === 'asteroids' ? 25 : 1);
           this.consume(item); this.chargeBlast(10);
         } else {
           this.state.points += this.canyon && (item.kind === 'turret' || item.kind === 'obstacle') ? canyonTargetPoints(item.kind) : 1;
@@ -367,33 +441,39 @@ export class BonusController {
         }
         boltHit = true;
         confirmed = true;
+        if (this.state.points > points) this.sounds.cue('score');
         if (item.kind !== 'hostileBolt') targetHit = true;
       }
       if (!boltHit) misses++;
     }
-    if (this.canyon && misses) {
+    if ((this.canyon || (this.smuggler && this.state.kind === 'asteroids')) && misses) {
       const cost = misses * CANYON_SHOT_MISS_COST;
-      this.state.points -= cost; this.state.notice = `SHOT MISSED -${cost}`;
+      this.state.points -= cost / (this.state.kind === 'asteroids' ? 25 : 1); this.state.notice = `SHOT MISSED -${cost}`;
+      this.sounds.cue('miss');
     }
     // A spread volley can touch the same wrong marker more than once: penalize the trigger pull once.
-    if (wrongMarker) { this.state.remaining = Math.max(0, this.state.remaining - 2); this.state.notice = 'WRONG MARKER: -2 SECONDS'; }
+    if (wrongMarker) { this.state.remaining = Math.max(0, this.state.remaining - 2); this.sounds.cue('wrongTarget'); this.state.notice = 'WRONG MARKER: -2 SECONDS'; }
     if (targetHit) this.chargeBlast(5);
     return confirmed;
   }
   private chargeBlast(amount: number): void {
-    if (!this.canyon?.penalty) this.state.charge = Math.min(100, this.state.charge + amount);
+    if (this.smuggler || !this.canyon?.penalty) this.state.charge = Math.min(100, this.state.charge + amount);
   }
   blast(camera: THREE.PerspectiveCamera): boolean {
     // Blasts consume the whole charge and vaporize hazards without splitting rocks.
     // Salvage, gates and numbered markers are deliberately outside this target list.
     if (this.state.finished || this.state.charge < 100) return false;
     this.state.charge = 0;
+    this.state.flight.blasts++;
     for (const item of [...this.objects, ...(this.traffic?.ships ?? [])]) {
-      if (item.used || (item.kind !== 'rock' && item.kind !== 'turret' && item.kind !== 'obstacle' && item.kind !== 'pirate') || item.object.position.distanceTo(camera.position) > 240) continue;
+      if (item.used || (item.kind !== 'rock' && item.kind !== 'turret' && item.kind !== 'obstacle' && item.kind !== 'pirate' && !(this.smuggler && item.kind === 'police')) || item.object.position.distanceTo(camera.position) > 240) continue;
       this.consume(item);
-      this.state.points += this.canyon && (item.kind === 'turret' || item.kind === 'obstacle') ? canyonTargetPoints(item.kind) : 1;
+      const points = this.canyon && (item.kind === 'turret' || item.kind === 'obstacle') ? canyonTargetPoints(item.kind) : 1;
+      this.state.points += points;
+      if (points > 0) this.sounds.cue('score');
     }
     this.canyon?.clearFire(camera.position);
+    this.traffic?.fire.clear(camera.position);
     if (this.blastEffect) { this.root.remove(this.blastEffect.object); disposeObject(this.blastEffect.object); }
     const direction = camera.getWorldDirection(new THREE.Vector3());
     const object = createPulseRing(0xcaffff, 18, 0, 1, 24);
@@ -404,17 +484,18 @@ export class BonusController {
     return true;
   }
   private consume(item: BonusObject): void {
-    if (item.kind === 'pirate' && this.traffic) this.traffic.destroy(item);
+    if ((item.kind === 'pirate' || item.kind === 'police') && this.traffic) this.traffic.destroy(item);
     else { item.used = true; item.object.visible = false; }
   }
-  private damage(source?: CanyonImpact): void {
-    if (this.collisionDelay > 0 || this.state.finished) return;
-    if (source) {
-      // Sustained wall contact has a grace interval; separate gun hits each count.
-      if (source !== 'gun' && this.canyonImpactDelay > 0) return;
-      Object.assign(this.state, damageCanyonSkiff(this.state, source));
-      if (source !== 'gun') this.canyonImpactDelay = 1.2;
-    } else { this.state.health -= 1; this.collisionDelay = 1.2; }
+  private damage(source: SkiffImpact): void {
+    if (this.state.finished) return;
+    // Contact evidence is independent of damage grace: bouncing off a second
+    // object still prevents a No Crash award, even during respawn protection.
+    if (source === 'gun') this.state.flight.bulletHits++;
+    else this.state.flight.crashes++;
+    if (this.collisionDelay > 0 || source !== 'gun' && this.canyonImpactDelay > 0) return;
+    Object.assign(this.state, damageSkiff(this.state, source, this.smuggler));
+    if (source !== 'gun') this.canyonImpactDelay = 1.2;
     if (this.state.health <= 0) this.finish('crash');
   }
   finish(reason: NonNullable<BonusRunState['reason']>): void {
@@ -428,7 +509,7 @@ export class BonusController {
     // every outcome and uses its own additional reward for a successful exit.
     if (this.state.kind === 'sequence') return THREE.MathUtils.clamp(this.state.points / (this.state.targetCount * (TARGET_HIT_POINTS - TARGET_SHOT_COST)), 0, 1);
     if (this.canyon) return THREE.MathUtils.clamp(this.canyon.progress * 0.3 + this.canyon.passed / 18 * 0.4 + this.state.points / this.canyon.gatePointsAvailable * 0.3, 0, 1);
-    return Math.min(1, (this.state.elapsed / this.state.duration) * 0.4 + this.state.points / this.profile.asteroidRows * 0.6);
+    return Math.min(1, (this.travelTime / this.routeDuration) * 0.4 + this.state.points / this.profile.asteroidRows * 0.6);
   }
   dispose(): void { disposeObject(this.root); this.root.clear(); }
 }

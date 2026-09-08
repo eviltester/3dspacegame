@@ -7,18 +7,50 @@ import { buildHud } from './hud-model';
 import type { HudFrame } from './hud-model';
 import { WEAPON_HELP } from '../weapons';
 import { COURSE_RADAR_VIEW, SPACE_RADAR_VIEW } from '../radar';
+import { parseSmugglerFlight, smugglerAwards } from '../smuggler-rewards';
 
 function frame(mode: GameMode = 'journey'): HudFrame & { run: NonNullable<HudFrame['run']> } {
   const run = newRun(mode, 1); run.phase = 'playing';
   return { run, menu: '', profile: freshProfile(), selectedMode: mode, bonus: null, definition: { kind: mode === 'invaders' ? 'armada' : 'patrol', title: 'PATROL' },
-    actors: [], throttle: 65, recovery: 8, intermission: 0, arrivalTime: 0, rescued: false, objectiveShip: null, director: { flight: 1, totalFlights: 2 },
+    actors: [], throttle: 65, recovery: 8, intermission: 0, respawnDelay: 0, arrivalTime: 0, rescued: false, objectiveShip: null, director: { flight: 1, totalFlights: 2 },
     position: new Vector3(), orientation: new Quaternion(), messages: [], feedbackTime: 0, hitTime: 0, popupTime: 0,
     gate: null, base: null, objectivePod: null, threat: null, shotDelay: 0, protection: 0 };
 }
 function bonus(kind: 'asteroids' | 'canyon' | 'sequence'): NonNullable<HudFrame['bonus']> {
-  return { state: { kind, difficulty: 4, points: 10, health: 2, shield: kind === 'canyon' ? 100 : 0, haul: 0, family: 'spread', charge: 100, remaining: 23.4, targetCount: 22, nextMarker: 4, shotsFired: 7 } };
+  return { state: { kind, difficulty: 4, points: 10, health: 2, shield: kind === 'canyon' ? 100 : 0, damage: 0, haul: 0, family: 'spread', charge: 100, remaining: 23.4, targetCount: 22, nextMarker: 4, shotsFired: 7 } };
 }
 describe('resource display is a projection, not independently updated state', () => {
+  it('groups survival stats at the top and shows charge without a lockout', () => {
+    const f = frame('smuggler'); f.bonus = bonus('asteroids');
+    f.bonus.state.damage = 80; f.bonus.state.charge = 45;
+    f.bonus.asteroidRun = { speed: 150, boosting: true, exitApproach: false };
+    const view = buildHud(f);
+    expect(view.text).toMatchObject({ topLives: '3', topShield: '0', topDamage: '80', chargeReadout: 'BLAST 45%', speedLabel: 'BOOST' });
+    expect(view.hidden['#survivalStats']).toBe(false); expect(view.hidden['#livesReadout']).toBe(true);
+    expect(view.hidden['#skiffDamage']).toBe(false);
+    expect(view.text.missionProgress).toBe('REACH EXIT');
+    expect(view.classes).toContainEqual({ selector: '#damageReadout', name: 'danger', active: true });
+  });
+  it('shows life lost during the respawn delay and hides it in a paused menu', () => {
+    const f = frame('smuggler'); f.respawnDelay = 4; f.run.lives = 2;
+    expect(buildHud(f).hidden['#lifeLost']).toBe(false); expect(buildHud(f).text.lifeLostLives).toBe('2 LIVES LEFT');
+    for (const remaining of [4, 3, 2, 1, 0.1]) {
+      f.respawnDelay = remaining;
+      expect(buildHud(f).text.lifeLostCountdown).toBe(`RESTART IN ${Math.ceil(remaining)} SECONDS`);
+    }
+    f.menu = 'pause'; expect(buildHud(f).hidden['#lifeLost']).toBe(true);
+    f.menu = ''; f.respawnDelay = 0; expect(buildHud(f).hidden['#lifeLost']).toBe(true);
+  });
+  it.each([true, false])('shows paid finish bonuses and cargo without recalculating score, clean exit %s', clean => {
+    const f = frame('smuggler'); f.intermission = 3; f.run.stageHaul = clean ? 3 : 0;
+    f.run.smugglerResult = { flight: 10, haul: 3, haulPoints: clean ? 225 : 0, seconds: 20,
+      awards: smugglerAwards(parseSmugglerFlight(), clean, false, 20) };
+    const model = buildHud(f);
+    expect(model.text.courseAwards).toContain('TIME BONUS (20s x 500) +10000');
+    expect(model.text.courseHeading).toBe(clean ? 'LEVEL COMPLETE' : 'LEVEL COMPLETE / EXIT MISSED');
+    expect(model.text.courseHaul).toBe(clean ? 'HAUL 3 x 75 = +225' : 'HAUL 3 LOST / +0');
+    expect(model.text.courseCondition).not.toContain('SKIFF');
+  });
   it('shows touch tools only in flight and throttle only during free flight', () => {
     const f = frame(); expect(buildHud(f).hidden['#touchTools']).toBe(true);
     f.profile.settings.controlScheme = 'touch';
@@ -26,7 +58,7 @@ describe('resource display is a projection, not independently updated state', ()
     f.menu = 'pause'; expect(buildHud(f).hidden['#touchTools']).toBe(true);
     f.menu = ''; f.intermission = 3; expect(buildHud(f).hidden['#touchTools']).toBe(true);
     f.intermission = 0; f.bonus = bonus('canyon'); expect(buildHud(f).hidden).toMatchObject({ '#touchThrottle': true, '#touchBoost': false });
-    f.bonus = bonus('asteroids'); expect(buildHud(f).hidden['#touchBoost']).toBe(true);
+    f.bonus = bonus('asteroids'); expect(buildHud(f).hidden['#touchBoost']).toBe(false);
     f.bonus = bonus('sequence'); expect(buildHud(f).hidden['#touchBoost']).toBe(true);
     f.bonus = null; f.definition.kind = 'armada'; expect(buildHud(f).hidden).toMatchObject({ '#touchThrottle': true, '#touchBoost': true });
     f.run.cleared = true; expect(buildHud(f).hidden['#touchThrottle']).toBe(false);
@@ -133,15 +165,15 @@ describe('mission and course readouts', () => {
     expect(buildHud({ ...f, menu: '', run: null }).text).toEqual({});
     const before = JSON.stringify(f); buildHud(f); expect(JSON.stringify(f)).toBe(before);
   });
-  it('shows canyon penalties, face-value score, next-gate reward and paused blast charging', () => {
+  it('shows canyon penalties, time reward, next-gate score and unrestricted hit charging', () => {
     const f = frame(); f.run.mode = 'smuggler'; f.run.pilot.score = 1000;
     f.bonus = bonus('canyon'); f.bonus.state.points = -200; f.bonus.state.charge = 40;
     f.bonus.canyon = { speed: 100, boosting: false, nextGate: 2, penalty: 400, nextGatePoints: 200 };
     const model = buildHud(f);
     expect(model.text.scoreReadout).toBe('000800'); expect(model.text.arcadeScore).toBe('000800');
     expect(model.text.creditReadout).toBe('FLIGHT -200'); expect(model.text.levelClock).toBe('PENALTY 400');
-    expect(model.text.timeBonusReadout).toBe('COURSE SCORE -200'); expect(model.hidden['#levelTimer']).toBe(false);
-    expect(model.text.missionProgress).toBe('GATE 3/18 / +200'); expect(model.text.chargeReadout).toBe('BLAST 40% / PAUSED');
+    expect(model.text.timeBonusReadout).toBe('+11500'); expect(model.hidden['#levelTimer']).toBe(false);
+    expect(model.text.missionProgress).toBe('GATE 3/18 / +200'); expect(model.text.chargeReadout).toBe('BLAST 40%');
     f.bonus.canyon.penalty = 0; expect(buildHud(f).text.levelClock).toBe('PENALTY 0'); expect(buildHud(f).text.chargeReadout).toBe('BLAST 40%');
     f.bonus = null; expect(buildHud(f).text.creditReadout).toBe('FLIGHT +0');
   });

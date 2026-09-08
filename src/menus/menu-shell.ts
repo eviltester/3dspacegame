@@ -19,6 +19,7 @@ export class MenuShell {
           <section class="hud-panel sector-panel"><div id="stageLabel" class="hud-label">JOURNEY</div><div id="sectorName" class="hud-value"></div><div id="reputation" class="hud-small"></div></section>
           <section class="hud-panel mission-panel"><div id="missionTitle" class="hud-value"></div><div id="missionProgress" class="hud-small"></div><div id="levelTimer" class="hud-small level-timer"><span id="levelClock"></span><span id="timeBonusReadout"></span></div></section>
           <section class="hud-panel cargo-panel"><div class="hud-label">SCORE</div><div id="scoreReadout" class="hud-value">000000</div><div id="creditReadout" class="hud-small"></div><div id="cargoReadout" class="hud-small"></div></section>
+          <section id="survivalStats" class="survival-stats" aria-label="Craft condition" hidden><div><span>LIVES</span><strong id="topLives"></strong></div><div><span>SHIELD</span><strong id="topShield"></strong></div><div><span>DAMAGE</span><strong id="topDamage"></strong></div></section>
           <div id="reticle" class="reticle"><span></span><span></span><span></span><span></span></div>
           <div id="hitConfirm" class="hit-confirm">+</div>
           <div id="objectiveArrow" class="objective-arrow"></div>
@@ -26,7 +27,7 @@ export class MenuShell {
           <div id="hitCallout" class="hit-callout"></div><div id="wantedBanner" class="wanted-banner">WANTED</div>
           <div id="messageLog" class="message-log"></div><div id="scorePopup" class="score-popup"></div>
           <canvas id="radar" class="radar" width="180" height="180" aria-label="Ship-relative 3D radar: contacts above or below the flight plane have vertical height lines"></canvas>
-          <div class="bottom-strip"><div><span class="hud-label">HULL</span><strong id="hullReadout"></strong></div><div><span class="hud-label">SHIELD</span><strong id="shieldReadout"></strong></div><div><span class="hud-label">WEAPON</span><strong id="weaponReadout"></strong></div><div><span id="speedLabel" class="hud-label">THROTTLE</span><strong id="speedReadout"></strong></div></div>
+          <div class="bottom-strip"><div><span id="hullLabel" class="hud-label">HULL</span><strong id="hullReadout"></strong><span id="skiffDamage" hidden><span id="damageReadout"></span></span></div><div><span class="hud-label">SHIELD</span><strong id="shieldReadout"></strong></div><div><span class="hud-label">WEAPON</span><strong id="weaponReadout"></strong></div><div><span id="speedLabel" class="hud-label">THROTTLE</span><strong id="speedReadout"></strong></div></div>
           <div class="arcade-strip"><span id="livesReadout"></span><span id="chainReadout"></span><span id="chargeReadout"></span></div>
         </div>
         <div class="flight-buttons">${button('pause', '||', 'id="pauseButton" aria-label="Pause" title="Pause"')}${button('exitBonus', 'EXIT BONUS', 'id="bonusExitButton" hidden')}${button('nextWave', 'NEXT WAVE', 'id="nextWaveButton" hidden')}
@@ -36,7 +37,8 @@ export class MenuShell {
             <span id="touchThrottle">${button('throttleDown', '-', 'aria-label="Decrease throttle" title="Decrease throttle"')}${button('throttleUp', '+', 'aria-label="Increase throttle" title="Increase throttle"')}</span>
           </div>
         </div>
-        <section id="courseSummary" class="course-summary" role="status" aria-label="Level complete" hidden><h2>HAUL DELIVERED</h2><p id="courseHaul" hidden></p><p id="courseScore"></p><p id="courseLives"></p><p id="courseNext"></p></section>
+        <section id="courseSummary" class="course-summary" role="status" aria-label="Level complete" hidden><h2 id="courseHeading">LEVEL COMPLETE</h2><p id="courseHaul" hidden></p><p id="courseAwards" hidden></p><p id="courseScore"></p><p id="courseLives"></p><p id="courseCondition" hidden></p><p id="courseNext"></p></section>
+        <section id="lifeLost" class="life-lost-screen" role="status" hidden><h2>LIFE LOST</h2><p id="lifeLostLives"></p><p id="lifeLostCountdown"></p></section>
         <div id="damageLayer" class="damage-layer"></div><div id="protectionLayer" class="protection-layer" hidden></div><div id="warpLayer" class="warp-layer"></div>
         <div id="launchOverlay" class="launch-overlay">
           <div class="arcade-menu">

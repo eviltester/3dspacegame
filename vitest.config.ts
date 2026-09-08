@@ -16,6 +16,7 @@ export default defineConfig({
         // coordination. Do not inflate it with integration runs or exclusions.
         // Directly testable rules have their own, much stricter coverage gates.
         statements: 60, branches: 64, functions: 60, lines: 65,
+        'src/audio/*.ts': { lines: 100, branches: 100, functions: 100 },
         'src/session/*.ts': { lines: 100, branches: 100, functions: 100 },
         'src/rendering/hud-model.ts': { lines: 100, branches: 90, functions: 100 },
         'src/menus/object-scan.ts': { lines: 100, branches: 100, functions: 100 },
@@ -26,12 +27,14 @@ export default defineConfig({
         'src/combat/weapon-fire.ts': { lines: 100, branches: 100, functions: 100 },
         'src/{canyon-gates,rendering/canyon-gates}.ts': { lines: 100, branches: 100, functions: 100 },
         'src/{skiff-repairs,bonus-repairs}.ts': { lines: 100, branches: 100, functions: 100 },
+        'src/{boost,skiff-vitals,belt-fire,canyon-gun-mounts}.ts': { lines: 100, branches: 95, functions: 100 },
         'src/{canyon-combat,canyon-haul}.ts': { lines: 100, branches: 100, functions: 100 },
         'src/{canyon-barriers,asteroid-traffic}.ts': { lines: 100, branches: 95, functions: 100 },
         'src/{course-radar,radar}.ts': { lines: 100, branches: 100, functions: 100 },
         'src/{life-rewards,rendering/player-protection}.ts': { lines: 100, branches: 80, functions: 100 },
         'src/{arcade,bonus,canyon,encounters}.ts': { lines: 90, branches: 85, functions: 60 },
         'src/{modes,invaders,smuggler,scores}.ts': { lines: 95, branches: 85, functions: 95 },
+        'src/smuggler-rewards.ts': { lines: 100, branches: 100, functions: 100 },
         'src/combat/*.ts': { lines: 85, branches: 75, functions: 80 },
         'src/world/*.ts': { lines: 90, branches: 75, functions: 90 }
       }

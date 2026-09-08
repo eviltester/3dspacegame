@@ -104,9 +104,9 @@ export class GameDriver {
     const result = await this.page.evaluate(() => {
       const overlay = document.querySelector<HTMLElement>('#launchOverlay')!;
       const root = overlay.hidden ? document.querySelector<HTMLElement>('.hud')! : overlay;
-      const overflow = [...root.querySelectorAll<HTMLElement>('button, dt, dd, h2, .model-copy p, #levelTimer, #stageLabel, #missionProgress')]
+      const overflow = [...root.querySelectorAll<HTMLElement>('button, dt, dd, h2, .model-copy p, #levelTimer, #stageLabel, #missionProgress, #damageReadout')]
         .filter(el => el.getClientRects().length && el.scrollWidth > el.clientWidth + 2).map(el => el.id || el.textContent);
-      const selectors = '.hud-panel,.radar,.bottom-strip,.message-log,.arcade-strip,.flight-buttons,#objectiveArrow,#threatArrow,#hitCallout';
+      const selectors = '.hud-panel,.radar,.bottom-strip,.message-log,.arcade-strip,.flight-buttons,#objectiveArrow,#threatArrow,#hitCallout,#survivalStats';
       const boxes = overlay.hidden ? [...document.querySelectorAll<HTMLElement>(selectors)]
         .filter(el => el.getClientRects().length && getComputedStyle(el).opacity !== '0')
         .map(el => ({ id: el.id || el.className, rect: el.getBoundingClientRect() })) : [];

@@ -25,7 +25,7 @@ function fixture(wave = 1, mode: GameMode = 'endless') {
       const actor = add({ kind, object, radius, hull, role: role ?? 'raider' }, position.x, position.z); return actor;
     }), removeActor: vi.fn<EnemyServices['removeActor']>(actor => { actor.dead = true; }), destroy: vi.fn<EnemyServices['destroy']>(actor => { actor.dead = true; }),
     damagePlayer: vi.fn<EnemyServices['damagePlayer']>(), announceArrival: vi.fn<EnemyServices['announceArrival']>(),
-    spawnShot: vi.fn<EnemyServices['spawnShot']>(), enemyShoot: vi.fn<EnemyServices['enemyShoot']>(), stopped: () => false
+    spawnShot: vi.fn<EnemyServices['spawnShot']>(), enemyShoot: vi.fn<EnemyServices['enemyShoot']>(), lockOn: vi.fn(), stopped: () => false
   } satisfies EnemyServices;
   const system = new EnemySystem(services);
   const tick = (seconds = 1 / 60) => { for (let t = 0; t < seconds; t += 1 / 60) { frame.run.elapsed += 1 / 60; system.update(1 / 60, frame); } };
@@ -33,6 +33,19 @@ function fixture(wave = 1, mode: GameMode = 'endless') {
 }
 
 describe('enemy targeting and arrival safety', () => {
+  it.each(['raider', 'flanker', 'diver', 'gunship', 'minelayer', 'carrier'] as const)('%s sends its own firing identity after one player lock-on warning', role => {
+    const { add, services, tick } = fixture();
+    add({ role }); tick(2);
+    expect(services.lockOn).toHaveBeenCalledOnce();
+    expect(services.enemyShoot).toHaveBeenCalledWith(role === 'raider' ? 'pirate' : role, expect.any(Number));
+  });
+  it('does not play player lock-on warnings when ships target each other', () => {
+    const { frame, add, services, tick } = fixture();
+    frame.position.set(1000, 0, 1000); frame.previousPosition.copy(frame.position);
+    add({}, 0); add({ kind: 'trader', faction: 'trader', firingVoice: 'saucer' }, 30); tick(2.2);
+    expect(services.enemyShoot).toHaveBeenCalledWith('saucer', expect.any(Number));
+    expect(services.lockOn).not.toHaveBeenCalled();
+  });
   it('police never target an innocent player, but switch to them when wanted', () => {
     const { frame, add, services, tick } = fixture();
     add({ kind: 'police', faction: 'police' }); tick(3);

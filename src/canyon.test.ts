@@ -17,9 +17,8 @@ function drive(course: CanyonCourse, miss: number[] = [], boost = false) {
 
 describe('accelerating canyon course', () => {
   it('starts at cruise, accelerates smoothly, and boosts without any braking path', () => {
-    expect(canyonSpeed(0, false)).toBe(48); expect(canyonSpeed(0.5, false)).toBe(96);
-    expect(canyonSpeed(1, false)).toBe(144); expect(canyonSpeed(0.5, true)).toBe(144);
-    expect(canyonSpeed(99, true)).toBe(216);
+    expect(canyonSpeed(0)).toBe(48); expect(canyonSpeed(0.5)).toBe(96);
+    expect(canyonSpeed(1)).toBe(144); expect(canyonSpeed(99)).toBe(144);
   });
   it('has large and half-size gates, stationary and moving openings, and a stationary final exit', () => {
     const bonus = new BonusController('canyon', 42), course = bonus.canyon!;

@@ -2,6 +2,7 @@
 import type * as THREE from 'three';
 import type { EnemyArchetype } from '../arcade';
 import type { CargoDrop, Faction } from '../logic';
+import type { ShipVoice } from '../audio/events';
 
 export type ActorKind = 'pirate' | 'trader' | 'police' | 'part' | 'base' | 'planet' | 'market' | 'gate' | 'cargo' | 'mine';
 export interface Actor {
@@ -9,6 +10,7 @@ export interface Actor {
   // formation home. A carrier part follows parent + offset instead of flying alone.
   id: number; kind: ActorKind; faction: Faction; object: THREE.Object3D; previous: THREE.Vector3;
   radius: number; hull: number; maxHull: number; role: EnemyArchetype; age: number;
+  firingVoice?: ShipVoice;
   // Timers are seconds. Negative windup means idle; target -1 marks retaliation
   // against the player (positive IDs identify other live actors).
   cooldown: number; windup: number; target: number; anchor: THREE.Vector3; offset: THREE.Vector3;

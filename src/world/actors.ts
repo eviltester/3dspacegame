@@ -9,6 +9,7 @@ import { createArmadaRig, createBaseModel, createPlanetModel, createBlackMarketM
   createTraderUfoModel, createTraderHaulerModel, createCargoModel, createEnemyModel, disposeObject, edgesFromGeometry, lineShape } from '../models';
 import type { Actor, ActorKind } from '../combat/types';
 import { createInvaderModel } from '../models/ships';
+import { shipVoice, invaderVoice } from '../audio/events';
 
 interface SpawnFrame { run: RunState; definition: StageDefinition; position: THREE.Vector3; orientation: THREE.Quaternion; rng: Random }
 
@@ -31,7 +32,7 @@ export class ActorWorld {
   add(kind: ActorKind, object: THREE.Object3D, position: THREE.Vector3, radius: number, hull: number, role: EnemyArchetype = 'raider'): Actor {
     object.position.copy(position); this.world.add(object);
     const actor: Actor = { id: this.allocateId(), kind, faction: kind === 'pirate' || kind === 'part' || kind === 'mine' ? 'pirate' : kind === 'police' ? 'police' : kind === 'trader' ? 'trader' : 'neutral',
-      object, previous: position.clone(), radius, hull, maxHull: hull, role, age: 0, cooldown: kind === 'pirate' ? 1.1 : 2, windup: -1, target: 0,
+      object, previous: position.clone(), radius, hull, maxHull: hull, role, firingVoice: shipVoice(kind, role), age: 0, cooldown: kind === 'pirate' ? 1.1 : 2, windup: -1, target: 0,
       anchor: position.clone(), offset: new THREE.Vector3(), parent: null, essential: false, drop: null, dead: false, spawned: 0, drift: null };
     this.active.push(actor); return actor;
   }
@@ -59,7 +60,7 @@ export class ActorWorld {
       this.world.add(this.rig.root);
     } else if (run.mode === 'journey') {
       this.add('police', createPoliceModel(), new THREE.Vector3(-150, 45, -190), 9, 130);
-      this.add('trader', createTraderUfoModel(), new THREE.Vector3(150, 30, -245), 10, 140);
+      this.add('trader', createTraderUfoModel(), new THREE.Vector3(150, 30, -245), 10, 140).firingVoice = 'saucer';
     }
     if (!run.cleared && definition.kind === 'rescue') {
       objectivePod = this.cargo({ type: 'rescuePod', amount: 1 }, new THREE.Vector3(0, 0, -90), true);
@@ -91,6 +92,7 @@ export class ActorWorld {
       }
       if (definition.kind === 'ambush' && run.elapsed > 5) position.sub(origin).applyAxisAngle(new THREE.Vector3(0, 1, 0), index % 2 ? 0.75 : -0.75).add(origin);
       const actor = this.add('pirate', run.mode === 'invaders' ? createInvaderModel(role) : createEnemyModel(role), position, role === 'carrier' ? 23 : role === 'gunship' ? 10 : 8, HULL[role], role);
+      if (run.mode === 'invaders') actor.firingVoice = invaderVoice(role);
       arrivals.push(actor);
       actor.cooldown += index * 0.25;
       if (role === 'carrier' && definition.kind === 'boss') {

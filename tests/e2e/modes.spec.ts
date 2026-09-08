@@ -47,14 +47,31 @@ for (const width of [1440, 390]) {
         for (let i = 0; i < pixels.length; i += 4) if (pixels[i] > 100 || pixels[i + 2] > 100) contacts++;
         expect(contacts, 'visible radar contacts, not just the grid and player marker').toBeGreaterThan(40);
         // Arrange a paid result for layout only; timer/progression rules have direct tests.
-        await page.evaluate(() => window.vectorShooterDebug.finishBonus('complete')); await game.step(0);
+        await page.evaluate(() => {
+          const bonus = window.vectorShooterDebug.getState().bonus!;
+          Object.assign(bonus.flight, { bulletHits: 0, crashes: 0, shots: 0, blasts: 0, enemies: true, gatesPassed: 18, gatesMissed: 0, topBoost: true });
+          window.vectorShooterDebug.finishBonus('complete');
+        }); await game.step(0);
         const summary = page.locator('#courseSummary'); await expect(summary).toBeVisible();
-        await expect(summary).toContainText('SCORE'); await expect(summary).toContainText('LIVES 3');
+        await expect(summary).toContainText('SCORE'); await expect(summary).toContainText(`LIVES ${(await game.state()).lives}`);
+        await expect(summary).toContainText('SUPER FLYER BONUS +5000');
         for (const child of await summary.locator('h2,p').all()) {
           const bounds = (await child.boundingBox())!;
           expect(bounds.x).toBeGreaterThanOrEqual(0); expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+          expect(bounds.y).toBeGreaterThanOrEqual(0); expect(bounds.y + bounds.height).toBeLessThanOrEqual(width > 650 ? 900 : 844);
         }
         await page.screenshot({ path: game.info.outputPath(`course-summary-${width}.png`) });
+        await game.step(3.1);
+        await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath()); await game.step(0.1);
+        await expect(page.locator('#lifeLost')).toBeVisible();
+        await expect(page.locator('#lifeLostCountdown')).toHaveText('RESTART IN 4 SECONDS');
+        const deathFrame = await game.screenshot(`smuggler-death-background-${width}`);
+        await game.step(1);
+        const movingFrame = await game.screenshot(`smuggler-death-moving-${width}`);
+        expect(movingFrame.equals(deathFrame), 'the retained course must keep animating').toBe(false);
+        await expect(page.locator('#lifeLostCountdown')).toHaveText('RESTART IN 3 SECONDS');
+        await page.screenshot({ path: game.info.outputPath(`smuggler-life-lost-${width}.png`) });
+        await game.step(3); await expect(page.locator('#lifeLost')).toBeHidden();
       }
       await game.pause(); await game.action('levelWarp');
     }

@@ -13,6 +13,8 @@ import type { Faction } from '../logic';
 import { createEnemyModel, edgesFromGeometry } from '../models';
 import type { Actor, ActorKind } from './types';
 import { InvaderFireDirector, invaderFireTiming } from './invader-fire';
+import { shipVoice } from '../audio/events';
+import type { ShipVoice } from '../audio/events';
 
 export interface EnemyFrame {
   run: RunState;
@@ -30,7 +32,8 @@ export interface EnemyServices {
   damagePlayer(damage: number, message: string): void;
   announceArrival(actors: Actor[], message: string): void;
   spawnShot(faction: Faction, source: number, target: number, position: THREE.Vector3, direction: THREE.Vector3, speed: number, damage: number, color: number, radius: number, length: number, pierce: number): void;
-  enemyShoot(faction: Faction, distance: number): void;
+  enemyShoot(voice: ShipVoice, distance: number): void;
+  lockOn(): void;
   stopped(): boolean;
 }
 
@@ -165,6 +168,7 @@ export class EnemySystem {
         this.invaderFire.started(actor, this.frame.run.stage);
       }
       actor.windup = ENEMY_ATTACK_WARNING;
+      if (aimsAtPlayer) this.services.lockOn();
     }
     if (actor.windup >= 0) {
       actor.windup -= dt;
@@ -191,7 +195,7 @@ export class EnemySystem {
             160 * this.frame.definition.speedScale, actor.kind === 'trader' ? 7 : 10, actor.faction === 'pirate' ? 0xff4055 : actor.faction === 'police' ? 0x75caff : 0x60ff85, 4.5, 20, 1);
         }
         actor.object.traverse(child => { if (child instanceof THREE.LineSegments) (child.material as THREE.LineBasicMaterial).opacity = 0.94; });
-        this.services.enemyShoot(actor.faction, actor.object.position.distanceTo(this.frame.position));
+        this.services.enemyShoot(actor.firingVoice ?? shipVoice(actor.kind, actor.role), actor.object.position.distanceTo(this.frame.position));
       }
     }
   }

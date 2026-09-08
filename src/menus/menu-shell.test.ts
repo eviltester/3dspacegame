@@ -130,10 +130,10 @@ it('does not browse objects from unrelated menus or after returning to flight', 
   expect(action).toHaveBeenCalledExactlyOnceWith('pause');
 });
 
-it.each([10, 5, 1, 0])('keeps Continue usable at countdown %s', async remaining => {
-  const run = newRun('journey', 1); run.lives = 0;
-  shell.show(...MenuViews.gameOver(run)); shell.text('deathTimer', String(remaining));
-  expect(screen.getByText(String(remaining))).toBeTruthy();
+it.each([0, 1000, 20000, 123456])('shows final score %s and a usable Continue choice', async score => {
+  const run = newRun('journey', 1); run.lives = 0; run.pilot.score = score;
+  shell.show(...MenuViews.gameOver(run));
+  expect(screen.getByText(score.toLocaleString('en-GB'))).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'CONTINUE' }));
   expect(action).toHaveBeenCalledExactlyOnceWith('relaunch');
 });

@@ -2,12 +2,12 @@ import { CONTROL_LAYOUTS, CONTROL_SCHEMES } from '../input-layouts';
 import type { ControlScheme } from '../input-layouts';
 import { button } from './menu-shell';
 
-export function controlsView(scheme: ControlScheme, sensitivity = 1): string {
+export function controlsView(scheme: ControlScheme, sensitivity = 1, mouseSensitivity = 1): string {
   const layout = CONTROL_LAYOUTS[scheme];
   const rows = scheme === 'touch' ? [
     ['TILT / DRAG', 'Steer / aim'], ['LEFT SIDE', 'Tap to fire; hold for continuous fire'],
     ['TAP RIGHT SIDE', 'Charged blast'], ['DOUBLE TAP EITHER SIDE', 'Cycle weapon; no blast'],
-    ['+ / -', 'Forward / stop / reverse'], ['BOOST', 'Brief boost in space or canyons'],
+    ['+ / -', 'Forward / stop / reverse'], ['HOLD BOOST', 'Accelerate in space, canyons and asteroid belts'],
     ['CENTRE', 'Recalibrate tilt at your current grip'], ['PAUSE', 'Pause / controls']
   ] : [
     [layout.steering, 'Steer / aim'],
@@ -28,6 +28,6 @@ export function controlsView(scheme: ControlScheme, sensitivity = 1): string {
     <p id="motionStatus" role="status" aria-label="Motion controls"></p>
     <label class="tilt-setting" for="tiltSensitivity">TILT SENSITIVITY <input id="tiltSensitivity" type="range" min="0.5" max="2" step="0.1" value="${sensitivity}"><output id="tiltValue" for="tiltSensitivity">${sensitivity.toFixed(1)}x</output></label>
     <p class="menu-description">Tap actions wait briefly to distinguish a double tap. Hold your phone comfortably, then enable tilt. Motion access requires HTTPS; drag steering is always available when tilt is off.</p>
-  </div>` : '';
+  </div>` : scheme === 'mouse' ? `<label class="tilt-setting" for="mouseSensitivity">MOUSE SENSITIVITY <input id="mouseSensitivity" type="range" min="0.5" max="2" step="0.1" value="${mouseSensitivity}"><output id="mouseValue" for="mouseSensitivity">${mouseSensitivity.toFixed(1)}x</output></label>` : '';
   return `<section class="controls-card"><h2>CONTROLS</h2><div class="control-select" role="group" aria-label="Control layout">${choices}</div>${motion}<dl class="control-grid">${rows.map(([key, label]) => `<div><dt>${key}</dt><dd>${label}</dd></div>`).join('')}</dl></section>`;
 }

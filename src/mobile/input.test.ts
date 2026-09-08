@@ -70,7 +70,7 @@ it('touch buttons adjust persistent throttle, including reverse, but cannot chan
   const f = setup(); f.input.adjustThrottle(1); f.input.boost(); expect(f.input.consume(1).speed).toBe(65);
   await f.input.engage(); f.input.adjustThrottle(1); expect(f.input.consume(1).speed).toBe(80);
   for (let i = 0; i < 7; i++) f.input.adjustThrottle(-1);
-  expect(f.input.throttle).toBe(-15); f.input.boost(); expect(f.input.consume(0.1).speed).toBe(-130);
+  expect(f.input.throttle).toBe(-15); f.input.boost(); expect(f.input.consume(0.1).speed).toBeCloseTo(-15.375);
   f.input.autoFlight = true; f.input.adjustThrottle(1); expect(f.input.throttle).toBe(-15);
-  expect(f.input.consume(0.1).speed).toBe(230); f.input.clear(); expect(f.input.consume(0.1).boost).toBe(false);
+  expect(f.input.consume(0.1)).toMatchObject({ speed: -15, boost: true }); f.input.clear(); expect(f.input.consume(0.1).boost).toBe(false);
 });

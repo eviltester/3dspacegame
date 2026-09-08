@@ -3,6 +3,7 @@ import { clone, loseCombatLife, loseLife, resetChain } from '../arcade';
 import type { RunState } from '../arcade';
 
 export const RESPAWN_PROTECTION_SECONDS = 3;
+export const SMUGGLER_LIFE_LOST_SECONDS = 4;
 export type RespawnKind = 'combat' | 'checkpoint';
 export type LifeDecision = { type: 'ignored' } | { type: 'respawn' | 'gameover'; record: RunState | null };
 export type DamageDecision = LifeDecision | { type: 'hit' };
@@ -14,7 +15,7 @@ export class FlightLifecycle {
   pendingRespawn: RespawnKind | null = null;
   grace = 3;
   protection = 0;
-  deathCountdown = 10;
+  respawnDelay = 0;
 
   canStep(run: RunState | null): boolean {
     return !!run && !this.menu && !this.paused && (ACTIVE.includes(run.phase) || this.pendingRespawn !== null);
@@ -24,27 +25,24 @@ export class FlightLifecycle {
     if (run.phase === 'briefing') run.phase = 'playing';
   }
   pause(run: RunState | null): boolean {
-    if (!run || !ACTIVE.includes(run.phase) || this.paused) return false;
+    if (!run || (!ACTIVE.includes(run.phase) && !this.pendingRespawn) || this.paused) return false;
     this.paused = true; this.menu = 'pause'; return true;
   }
   resetStage(protection = 0): void {
-    this.pendingRespawn = null; this.paused = false;
+    this.pendingRespawn = null; this.respawnDelay = 0; this.paused = false;
     this.protection = Math.max(0, Math.min(RESPAWN_PROTECTION_SECONDS, protection));
     this.grace = this.protection > 0 ? 0 : 3;
   }
   tick(run: RunState, dt: number): void {
     if (!this.canStep(run) || !Number.isFinite(dt) || dt <= 0) return;
+    this.respawnDelay = Math.max(0, this.respawnDelay - dt);
+    if (this.respawnDelay < 1e-6) this.respawnDelay = 0;
+    if (this.pendingRespawn) return;
     this.grace = Math.max(0, this.grace - dt);
     this.protection = Math.max(0, this.protection - dt);
     if (this.protection < 1e-6) this.protection = 0;
   }
-  showGameOver(): void { this.menu = 'gameover'; this.deathCountdown = 10; }
-  tickDisplay(dt: number, hidden: boolean): boolean {
-    if (this.menu !== 'gameover' || hidden || !Number.isFinite(dt) || dt <= 0) return false;
-    this.deathCountdown = Math.max(0, this.deathCountdown - dt);
-    if (this.deathCountdown > 1e-6) return false;
-    this.deathCountdown = 0; this.menu = 'title'; this.paused = false; return true;
-  }
+  showGameOver(): void { this.menu = 'gameover'; this.respawnDelay = 0; }
   damage(run: RunState, amount: number): DamageDecision {
     if (this.menu || this.paused || this.grace > 0 || this.protection > 0 || this.pendingRespawn || run.phase !== 'playing' || !Number.isFinite(amount) || amount <= 0) return { type: 'ignored' };
     const shield = Math.min(run.pilot.shield, amount);
@@ -68,11 +66,12 @@ export class FlightLifecycle {
       return { type: 'gameover', record: null };
     }
     this.pendingRespawn = kind;
+    this.respawnDelay = run.mode === 'smuggler' ? SMUGGLER_LIFE_LOST_SECONDS : 0;
     return { type: 'respawn', record: null };
   }
   consumeRespawn(run: RunState): RespawnKind | null {
     const kind = this.pendingRespawn;
-    if (!kind) return null;
+    if (!kind || this.respawnDelay > 0) return null;
     this.pendingRespawn = null;
     run.phase = 'playing'; this.menu = ''; this.paused = false;
     this.grace = 0; this.protection = RESPAWN_PROTECTION_SECONDS;

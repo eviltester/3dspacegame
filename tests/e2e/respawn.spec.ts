@@ -23,5 +23,15 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       if (b > 100 && b > g * 1.4 && g > r * 1.6) normalBlue++;
     }
     expect(normalBlue).toBeLessThan(blue);
+    await page.evaluate(() => window.vectorShooterDebug.giveScore(123456));
+    const lives = (await game.state()).lives!;
+    for (let i = 0; i < lives; i++) { await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath()); await game.step(0.02); }
+    await expect(page.locator('#finalScore')).toHaveText('123,456');
+    await game.layout();
+    await page.screenshot({ path: game.info.outputPath(`gameover-score-${viewport.width}.png`) });
+    // Persistence is unit-tested; the browser check only covers this screen's layout.
+    await page.clock.runFor(50);
+    await expect(page.locator('#launchOverlay')).toHaveAttribute('data-mode', 'gameover');
+    await expect(page.locator('[data-action="relaunch"]')).toBeEnabled();
   });
 }

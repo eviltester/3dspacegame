@@ -18,4 +18,5 @@ export class CanyonGateScore {
   }
 }
 
-export const CANYON_GATE_BRIEF = 'Gates: large +50, small +100; moving gates pay double. Misses cost 200 points, increasing by 200 each time. Each pass reduces the penalty by 200. While penalized, the next gate pulses bright green and blast charging pauses.';
+export const CANYON_GATE_SCORING_BRIEF = 'Gates: large +50, small +100; moving gates pay double. Misses cost 200 points, increasing by 200 each time. Each pass reduces the penalty by 200. While penalized, the next gate pulses bright green.';
+export const CANYON_GATE_BRIEF = `${CANYON_GATE_SCORING_BRIEF} Blast charging pauses during gate penalties.`;

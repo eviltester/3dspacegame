@@ -12,6 +12,12 @@ it('latches a quick mouse click, maintains throttle, and clears held input on pa
   const pause = vi.fn(), special = vi.fn();
   const input = new FlightInput(canvas, pause, special);
   await input.engage();
+  input.mouseSensitivity = 1.8;
+  windowTarget.dispatchEvent(Object.assign(new Event('mousemove'), { movementX: 10, movementY: -5 }));
+  expect(input.consume(0.1)).toMatchObject({ x: 18, y: -9 });
+  input.mouseSensitivity = 0.5;
+  windowTarget.dispatchEvent(Object.assign(new Event('mousemove'), { movementX: 10, movementY: -5 }));
+  expect(input.consume(0.1)).toMatchObject({ x: 5, y: -2.5 });
   const mouse = (target: EventTarget, name: string, button: number) => target.dispatchEvent(Object.assign(new Event(name), { button }));
   mouse(canvas, 'mousedown', 0); mouse(windowTarget, 'mouseup', 0);
   expect(input.consumeFire()).toBe(true); expect(input.consumeFire()).toBe(false);
@@ -58,7 +64,7 @@ it.each(['KeyS', 'ArrowDown'])('allows %s to reverse, maintains reverse on relea
   key('keyup', code);
   expect(input.consume(10)).toEqual({ x: 0, y: 0, roll: 0, speed: -90, boost: false });
   key('keydown', 'ShiftLeft');
-  expect(input.consume(0.1).speed).toBe(-130);
+  expect(input.consume(0.1).speed).toBeCloseTo(-92.25);
   expect(input.throttle).toBe(-90);
   input.release();
   await input.engage();
@@ -68,7 +74,7 @@ it.each(['KeyS', 'ArrowDown'])('allows %s to reverse, maintains reverse on relea
   expect(input.consume(1).speed).toBe(70);
   expect(input.consume(10).speed).toBe(180);
   key('keyup', 'KeyW'); key('keydown', 'ShiftRight');
-  expect(input.consume(0.1).speed).toBe(230);
+  expect(input.consume(0.1).speed).toBeCloseTo(184.5);
 });
 
 it.each([
@@ -215,7 +221,7 @@ it.each(['wasd', 'arrows'] as const)('%s supports independent steering, weapons,
   up(layout.special[0]); key(layout.special[0]); expect(special).toHaveBeenCalledTimes(2);
   key('KeyF'); key('KeyQ'); expect(input.consume(1)).toMatchObject({ speed: -35, roll: 1 });
   up('KeyF'); up('KeyQ'); key('KeyE'); key('ShiftRight');
-  expect(input.consume(1)).toMatchObject({ speed: -130, roll: -1, boost: true });
+  expect(input.consume(1)).toMatchObject({ speed: -43.75, roll: -1, boost: true });
   up('ShiftRight'); up('KeyE'); key('KeyR'); expect(input.consume(1).speed).toBe(45);
   up('KeyR'); expect(input.consume(1).speed).toBe(45);
   input.autoFlight = true; key('KeyF'); key('ShiftLeft'); key(layout.down[0]);

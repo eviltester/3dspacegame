@@ -3,40 +3,52 @@ import { advance, dock, freshProfile, loseCombatLife, newRun, parseProfile, pick
 import { awardScoreLives } from './life-rewards';
 
 describe('score-based lives', () => {
-  it('awards an Invaders life at each 20,000 points, once, including multiple crossings', () => {
-    const run = newRun('invaders', 1);
-    expect(run.nextLifeScore).toBe(20000);
-    run.pilot.score = 19999; expect(awardScoreLives(run)).toBe(0);
+  it.each(['invaders', 'smuggler'] as const)('awards a %s life at each 35,000 points, once, including multiple crossings', mode => {
+    const run = newRun(mode, 1);
+    expect(run.nextLifeScore).toBe(35000);
+    run.pilot.score = 34999; expect(awardScoreLives(run)).toBe(0);
     run.pilot.score++; expect(awardScoreLives(run)).toBe(1); expect(run.lives).toBe(4);
-    expect(awardScoreLives(run)).toBe(0); run.pilot.score = 19995; expect(awardScoreLives(run)).toBe(0);
-    run.pilot.score = 60000; expect(awardScoreLives(run)).toBe(1); expect(run.nextLifeScore).toBe(80000);
+    expect(awardScoreLives(run)).toBe(0); run.pilot.score = 34995; expect(awardScoreLives(run)).toBe(0);
+    run.pilot.score = 105000; expect(awardScoreLives(run)).toBe(1); expect(run.nextLifeScore).toBe(140000);
     loseCombatLife(run); expect(awardScoreLives(run)).toBe(0); expect(run.lives).toBe(4);
   });
   it('preserves consumed milestones through retries and save/resume, resetting on continue', () => {
     const profile = freshProfile(), run = newRun('invaders', 2);
-    run.pilot.score = 40000; awardScoreLives(run); run.phase = 'playing';
+    run.pilot.score = 70000; awardScoreLives(run); run.phase = 'playing';
     saveCheckpoint(profile, run);
     const restored = parseProfile(JSON.stringify(profile), null).checkpoints.invaders!;
-    expect(restored.nextLifeScore).toBe(60000); expect(restored.lives).toBe(5);
-    retry(restored); restored.pilot.score = 40000; expect(awardScoreLives(restored)).toBe(0);
-    retry(restored, true); expect(restored.nextLifeScore).toBe(20000); expect(restored.pilot.score).toBe(0);
+    expect(restored.nextLifeScore).toBe(105000); expect(restored.lives).toBe(5);
+    retry(restored); restored.pilot.score = 70000; expect(awardScoreLives(restored)).toBe(0);
+    retry(restored, true); expect(restored.nextLifeScore).toBe(35000); expect(restored.pilot.score).toBe(0);
   });
-  it('uses mode-specific thresholds and does not give combat score lives in Journey or Attack Challenge', () => {
+  it('does not give combat score lives in Journey or Attack Challenge', () => {
     for (const mode of ['journey', 'endless'] as const) {
       const run = newRun(mode, 1); run.pilot.score = 60000;
       expect(awardScoreLives(run)).toBe(0); expect(run.lives).toBe(3);
     }
-    const smuggler = newRun('smuggler', 1); smuggler.pilot.score = 5000;
-    expect(awardScoreLives(smuggler)).toBe(1); expect(smuggler.nextLifeScore).toBe(10000);
+    const smuggler = newRun('smuggler', 1); smuggler.pilot.score = 35000;
+    expect(awardScoreLives(smuggler)).toBe(1); expect(smuggler.nextLifeScore).toBe(70000);
   });
   it('normalizes a saved Invaders checkpoint into its continuous recovery flow', () => {
     const profile = freshProfile(), run = newRun('invaders', 1);
     run.cleared = true; run.phase = 'shop'; run.nextLifeScore = 5000; run.pilot.score = 21000;
     profile.checkpoints.invaders = run;
     const restored = parseProfile(JSON.stringify(profile), null).checkpoints.invaders!;
-    expect(restored.phase).toBe('recovery'); expect(restored.nextLifeScore).toBe(40000);
+    expect(restored.phase).toBe('recovery'); expect(restored.nextLifeScore).toBe(35000);
     expect(awardScoreLives(restored)).toBe(0);
   });
+});
+
+it.each(['smuggler', 'invaders'] as const)('retains %s checkpoints with smaller stored milestones without awarding on load', mode => {
+  for (const [score, milestone, expected] of [[0, 5000, 35000], [9000, 10000, 35000], [36000, 40000, 70000], [34000, 75000, 105000]]) {
+    const profile = freshProfile(), run = newRun(mode, 4);
+    run.pilot.score = score; run.nextLifeScore = milestone; run.lives = 2; run.stage = 7;
+    profile.checkpoints[mode] = run;
+    const restored = parseProfile(JSON.stringify(profile), null).checkpoints[mode]!;
+    expect(restored).toMatchObject({ lives: 2, stage: 7, nextLifeScore: expected, pilot: { score } });
+    expect(awardScoreLives(restored)).toBe(0);
+    expect(parseProfile(JSON.stringify({ ...profile, checkpoints: { [mode]: restored } }), null).checkpoints[mode]!.nextLifeScore).toBe(expected);
+  }
 });
 
 describe('continuous combat lives and repairs', () => {

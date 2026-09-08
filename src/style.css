@@ -43,6 +43,7 @@ button { font: inherit; }
 .bottom-strip div { min-height: 44px; padding: 8px 10px; border-top: 1px solid #397a53; }
 .bottom-strip strong { display: block; color: #ededed; font-size: 18px; line-height: 1.2; }
 .bottom-strip strong.cooling { color: #ffbf48; }
+#skiffDamage { font-size: 10px; line-height: 14px; color: #ffbf48; white-space: nowrap; }
 .wanted-banner { position: absolute; top: 102px; left: 50%; padding: 6px 18px; color: #ff5050; font-weight: 700; transform: translateX(-50%); opacity: 0; }
 .wanted-banner.active { opacity: 1; }
 .message-log { position: absolute; right: 22px; bottom: 104px; width: min(420px, calc(100% - 260px)); min-height: 72px; color: #dedede; font-size: 13px; line-height: 1.35; text-align: right; white-space: pre-line; }
@@ -84,10 +85,9 @@ button { font: inherit; }
 .launch-overlay button:hover { color: #8affb0; }
 .launch-overlay button:focus-visible { outline: 1px solid #ffff70; outline-offset: 5px; }
 .launch-overlay button:disabled { color: #888; cursor: wait; }
-.death-countdown { display: grid; justify-items: center; gap: 12px; margin-bottom: 24px; }
-.death-countdown.hidden { display: none; }
-.death-countdown span { font-size: 12px; color: #ededed; }
-.death-countdown strong { font-size: 64px; line-height: 1; font-weight: 400; color: #ffff70; font-variant-numeric: tabular-nums; }
+.gameover-score { display: grid; justify-items: center; gap: 12px; margin: 24px 0; }
+.gameover-score span { font-size: 12px; color: #ededed; }
+.gameover-score strong { max-width: 100%; overflow-wrap: anywhere; font-size: 52px; line-height: 1.2; color: #ffff70; font-variant-numeric: tabular-nums; }
 .launch-overlay[data-mode="death"] .briefing { max-width: 680px; grid-template-areas: "header header" "actions actions"; row-gap: 42px; }
 .launch-overlay[data-mode="death"] .mission-briefing,
 .launch-overlay[data-mode="death"] .controls-card,
@@ -232,7 +232,44 @@ button { font: inherit; }
 .course-summary p { margin: 0; font-size: 22px; max-width: 100%; overflow-wrap: anywhere; }
 .course-summary #courseNext { font-size: 14px; color: #ededed; }
 .course-summary #courseHaul { font-size: 16px; color: #8affb0; }
+.course-summary #courseCondition { font-size: 12px; color: #ededed; }
 .course-intermission .hud { visibility: hidden; }
+.course-summary #courseAwards { white-space: pre-line; font-size: 13px; line-height: 1.65; }
+.life-lost-screen { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; gap: 20px; padding: 16px; text-align: center; color: #ffff70; background: #0006; text-shadow: 0 2px 4px #000, 0 0 12px #000; pointer-events: none; }
+.life-lost-screen h2 { margin: 0; font-size: 36px; color: #ff7777; }
+.life-lost-screen p { margin: 0; font-size: 24px; }
+.life-lost-screen #lifeLostCountdown { font-size: 16px; color: #ededed; }
+.life-lost .hud { visibility: hidden; }
+.survival-stats { position: absolute; top: 24px; right: 220px; width: 330px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; text-align: center; }
+.survival-stats span { display: block; font-size: 11px; color: #ffff70; }
+.survival-stats strong { display: block; margin-top: 6px; font-size: 22px; color: #ededed; }
+.survival-stats .danger { color: #ff7777; }
+.smuggler-hud .cargo-panel { width: 190px; min-width: 0; }
+.smuggler-hud .cargo-panel .hud-small { white-space: normal; overflow-wrap: anywhere; }
+.smuggler-hud .sector-panel { top: 114px; width: 38%; }
+.smuggler-hud .mission-panel { top: 114px; right: 18px; left: auto; transform: none; width: 54%; text-align: right; }
+.smuggler-hud .level-timer { justify-content: flex-end; flex-wrap: wrap; }
+.smuggler-hud .bottom-strip > div:nth-child(-n+2) { display: none; }
+.smuggler-hud .bottom-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.game-shell.smuggler-hud .flight-buttons { top: 190px; }
+.smuggler-hud .hit-callout { top: 248px; }
+@media (max-width: 480px) {
+  .survival-stats { top: 22px; gap: 6px; }
+  .survival-stats span { font-size: 10px; }
+  .survival-stats strong { font-size: 18px; }
+  .course-summary { gap: 10px; padding: 16px; }
+  .gameover-score strong { font-size: 36px; }
+}
+@media (max-width: 760px) {
+  .survival-stats { left: 12px; right: 34%; width: auto; }
+  .smuggler-hud .cargo-panel { width: 30%; }
+}
+@media (max-height: 540px) {
+  .course-summary { gap: 6px; padding: 12px; }
+  .course-summary h2 { margin: 0; font-size: 16px; }
+  .course-summary p { font-size: 16px; }
+  .course-summary #courseAwards { font-size: 11px; line-height: 1.4; }
+}
 .shop-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid #35423b; }
 .shop-row strong { font-size: 13px; }
 .shop-row span { display: block; color: #acb7b0; font-size: 11px; margin-top: 6px; }
@@ -243,8 +280,8 @@ button { font: inherit; }
 .launch-overlay .shop-row button { color: #ffff70; border: 0; flex-shrink: 0; }
 .flight-buttons { position: absolute; top: 110px; left: 26px; display: flex; gap: 12px; z-index: 2; }
 .flight-buttons button { min-width: 40px; min-height: 40px; padding: 8px; color: #ffff70; background: #000b; border: 1px solid #397a53; cursor: pointer; font-size: 12px; }
-.arcade-strip { position: absolute; right: 32px; left: 240px; bottom: 92px; display: flex; justify-content: flex-end; gap: 24px; color: #ffff70; font-size: 12px; }
-.message-log { bottom: 125px; }
+.arcade-strip { position: absolute; right: 32px; left: 240px; bottom: 108px; display: flex; justify-content: flex-end; gap: 24px; color: #ffff70; font-size: 12px; }
+.message-log { bottom: 141px; }
 .objective-arrow, .threat-arrow { position: absolute; left: 50%; transform: translateX(-50%); text-align: center; font-size: 13px; }
 .objective-arrow { top: 100px; }
 .threat-arrow { top: 124px; }
@@ -252,8 +289,8 @@ button { font: inherit; }
 .hit-confirm { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 40px; color: #ffff70; opacity: 0; }
 .score-popup { position: absolute; top: calc(50% + 44px); left: 50%; transform: translateX(-50%); color: #ffff70; font-size: 17px; opacity: 0; }
 @media (max-width: 1080px) {
-  .arcade-strip { bottom: 126px; left: 148px; right: 15px; gap: 12px; flex-wrap: wrap; font-size: 10px; }
-  .message-log { bottom: 174px; }
+  .arcade-strip { bottom: 142px; left: 148px; right: 15px; gap: 12px; flex-wrap: wrap; font-size: 10px; }
+  .message-log { bottom: 190px; }
   .flight-buttons { top: 100px; left: 15px; flex-direction: column; }
   .hit-callout { top: 148px; }
 }
@@ -275,6 +312,7 @@ button { font: inherit; }
 
 @media (max-width: 380px) {
   .bottom-strip strong { font-size: 12px; white-space: nowrap; }
+  #skiffDamage { font-size: 9px; }
 }
 
 /* Suppress browser gestures only over the flying surface, never over menus. */
@@ -302,6 +340,6 @@ button { font: inherit; }
   .touch-controls .flight-buttons { top: 100px; }
   .touch-controls .radar { width: 90px; height: 90px; }
   .touch-controls .bottom-strip { left: 120px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .touch-controls .arcade-strip { bottom: 78px; left: 120px; }
-  .touch-controls .message-log { bottom: 104px; min-height: 0; }
+  .touch-controls .arcade-strip { bottom: 94px; left: 120px; }
+  .touch-controls .message-log { bottom: 120px; min-height: 0; }
 }

@@ -34,9 +34,9 @@ export function projectilePreviews(): { family: string; bright: string; dim: str
 }
 
 /** Render the real course geometry at two explicit times, without a running game. */
-export function coursePreview(kind: BonusKind, width: number, height: number): string[] {
+export function coursePreview(kind: BonusKind, width: number, height: number, difficulty = 8, smuggler = false): string[] {
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setSize(width, height);
-  const course = new BonusController(kind, 42, 8), scene = new THREE.Scene(); scene.add(course.root);
+  const course = new BonusController(kind, 42, difficulty, smuggler), scene = new THREE.Scene(); scene.add(course.root);
   const camera = new THREE.PerspectiveCamera(72, width / height, 0.1, 4000);
   const flightCamera = camera.clone();
   const pillar = course.canyon?.barriers.items.find(item => item.kind === 'risingPillar');
@@ -44,7 +44,12 @@ export function coursePreview(kind: BonusKind, width: number, height: number): s
   const frames: string[] = [];
   for (const dt of [0, 0.12]) {
     course.step(dt, { x: 0, y: 0 }, flightCamera); camera.copy(flightCamera);
-    if (pillar) {
+    const gun = smuggler ? course.canyon?.targets.find(target => target.mount?.kind === 'floor') : undefined;
+    if (gun?.mount) {
+      // The same surface-relative viewpoint exposes size changes across difficulties.
+      camera.position.copy(gun.mount.position).add(new THREE.Vector3(0, 32, 85));
+      camera.lookAt(gun.mount.position);
+    } else if (pillar) {
       // Inspect real scenery in its canyon, near enough to see the retracting column.
       camera.position.copy(pillar.base).add(new THREE.Vector3(-pillar.base.x * 0.1, 42, 150));
       camera.lookAt(pillar.base.clone().add(new THREE.Vector3(0, 26, -30)));

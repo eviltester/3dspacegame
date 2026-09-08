@@ -10,11 +10,13 @@ import { MobileInput } from './input';
 let controls: MobileControls;
 const profile = freshProfile(), persist = vi.fn(), boost = vi.fn(), throttle = vi.fn();
 let mobile: MobileInput;
+let input: ConstructorParameters<typeof MobileControls>[0];
 beforeEach(() => {
   profile.settings.controlScheme = 'touch'; profile.settings.tiltSensitivity = 1.4;
   document.body.innerHTML = FrontMenus.controls(profile)[3] + '<button id="touchCentre">Centre</button>';
   mobile = new MobileInput(document.createElement('canvas'), () => false, () => controls?.refresh());
-  controls = new MobileControls({ mobile, boost, adjustThrottle: throttle }, profile, persist);
+  input = { active: true, mobile, mouseSensitivity: 1, setBoostHeld: boost, adjustThrottle: throttle };
+  controls = new MobileControls(input, profile, persist);
   controls.refresh(); document.body.addEventListener('click', click);
 });
 const click = (event: MouseEvent) => { const name = (event.target as HTMLElement).dataset.action; if (name) controls.action(name); };
@@ -29,7 +31,8 @@ it('shows the actual touch gestures and saves slider interaction without rebuild
   fireEvent.input(slider, { target: { value: '1.8' } });
   expect(profile.settings.tiltSensitivity).toBe(1.8); expect(mobile.sensitivity).toBe(1.8);
   expect(screen.getByText('1.8x')).toBeTruthy(); expect(persist).toHaveBeenCalledOnce();
-  fireEvent.input(document.body); fireEvent.input(document.createElement('input')); expect(persist).toHaveBeenCalledOnce();
+  const unrelated = document.createElement('input'); document.body.append(unrelated);
+  fireEvent.input(document.body); fireEvent.input(unrelated); expect(persist).toHaveBeenCalledOnce();
 });
 it('allows enable, centre and drag selection with accessible buttons', async () => {
   const user = userEvent.setup();
@@ -44,10 +47,20 @@ it('allows enable, centre and drag selection with accessible buttons', async () 
 });
 it('routes flight buttons, ignores unknown commands, and leaves non-touch controls alone', () => {
   controls.action('touchBoost'); controls.action('throttleUp'); controls.action('throttleDown');
-  expect(boost).toHaveBeenCalledOnce(); expect(throttle.mock.calls).toEqual([[1], [-1]]);
+  expect(boost).not.toHaveBeenCalled(); expect(throttle.mock.calls).toEqual([[1], [-1]]);
   expect(controls.action('pause')).toBe(false); profile.settings.controlScheme = 'mouse';
-  expect(controls.action('touchBoost')).toBe(false); expect(boost).toHaveBeenCalledOnce();
-  document.body.innerHTML = ''; controls.refresh();
+  expect(controls.action('touchBoost')).toBe(false); expect(boost).not.toHaveBeenCalled();
+  document.body.innerHTML = ''; input.active = false; controls.refresh();
+});
+it('adjusts and persists mouse sensitivity independently of tilt without replacing the focused slider', () => {
+  profile.settings.controlScheme = 'mouse'; profile.settings.mouseSensitivity = 1;
+  document.body.innerHTML = FrontMenus.controls(profile)[3];
+  const slider = screen.getByRole('slider', { name: 'MOUSE SENSITIVITY' }); slider.focus();
+  fireEvent.input(slider, { target: { value: '0.7' } });
+  expect(input.mouseSensitivity).toBe(0.7); expect(profile.settings.mouseSensitivity).toBe(0.7);
+  expect(mobile.sensitivity).toBe(1.4); expect(persist).toHaveBeenCalledOnce();
+  expect(screen.getByText('0.7x')).toBeTruthy(); expect(document.activeElement).toBe(slider);
+  expect(parseProfile(JSON.stringify(profile), null).settings.mouseSensitivity).toBe(0.7);
 });
 it('defaults new touch devices to touch but preserves explicit saved layouts and sensitivity', () => {
   expect(parseProfile(null, null, 'touch').settings.controlScheme).toBe('touch');

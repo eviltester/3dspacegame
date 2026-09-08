@@ -18,6 +18,7 @@ import { WEAPON_HELP } from '../weapons';
 import { accuracyPercent } from '../combat/accuracy';
 import { smugglerFlightPoints, smugglerFlightScore } from '../smuggler';
 import { canyonHaulPoints, HAUL_PICKUP_POINTS } from '../canyon-combat';
+import { SMUGGLER_TIME_RATE, smugglerResultLines } from '../smuggler-rewards';
 
 export interface HudFrame {
   menu: string;
@@ -25,9 +26,9 @@ export interface HudFrame {
   selectedMode: GameMode;
   run: RunState | null;
   bonus: {
-    state: Pick<BonusRunState, 'kind' | 'difficulty' | 'points' | 'health' | 'shield' | 'haul' | 'family' | 'charge' | 'remaining' | 'targetCount' | 'nextMarker' | 'shotsFired'>;
+    state: Pick<BonusRunState, 'kind' | 'difficulty' | 'points' | 'health' | 'shield' | 'damage' | 'haul' | 'family' | 'charge' | 'remaining' | 'targetCount' | 'nextMarker' | 'shotsFired'>;
     canyon?: { speed: number; boosting: boolean; nextGate: number; penalty: number; nextGatePoints: number } | null;
-    asteroidRun?: { speed: number; exitApproach: boolean } | null;
+    asteroidRun?: { speed: number; exitApproach: boolean; boosting?: boolean } | null;
     radarContacts?: RadarContact[];
   } | null;
   definition: Pick<StageDefinition, 'kind' | 'title'>;
@@ -35,6 +36,7 @@ export interface HudFrame {
   throttle: number;
   recovery: number;
   intermission: number;
+  respawnDelay: number;
   arrivalTime: number;
   rescued: boolean;
   objectiveShip: Actor | null;
@@ -80,13 +82,21 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   };
   const protectedFlight = frame.protection > 0 && !frame.menu;
   const intermission = frame.intermission > 0 && !frame.menu;
+  const lifeLost = frame.respawnDelay > 0 && !frame.menu;
+  const smuggler = frame.run?.mode === 'smuggler';
+  toggle('.game-shell', 'smuggler-hud', smuggler);
+  model.hidden['#survivalStats'] = !smuggler;
+  model.hidden['#livesReadout'] = smuggler;
+  model.hidden['#lifeLost'] = !lifeLost;
+  toggle('.game-shell', 'life-lost', lifeLost);
   const touch = frame.profile.settings.controlScheme === 'touch';
   const armadaLocked = frame.definition.kind === 'armada' && (!frame.run?.cleared || frame.run.mode === 'invaders') && !frame.bonus;
-  model.hidden['#touchTools'] = !touch || !!frame.menu || intermission;
+  model.hidden['#touchTools'] = !touch || !!frame.menu || intermission || lifeLost;
   model.hidden['#touchThrottle'] = !!frame.bonus || armadaLocked;
-  model.hidden['#touchBoost'] = armadaLocked || !!frame.bonus && frame.bonus.state.kind !== 'canyon';
+  model.hidden['#touchBoost'] = armadaLocked || frame.bonus?.state.kind === 'sequence';
   toggle('.game-shell', 'touch-controls', touch);
   model.hidden['#courseSummary'] = !intermission;
+  model.hidden['#courseCondition'] = !intermission;
   toggle('.game-shell', 'course-intermission', intermission);
   toggle('.game-shell', 'protected-flight', protectedFlight);
   model.hidden['#protectionLayer'] = !protectedFlight;
@@ -98,10 +108,21 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   }
   if (!frame.run) return model;
   const run = frame.run; const pilot = run.pilot;
+  if (lifeLost) {
+    text('lifeLostLives', `${run.lives} LIVES LEFT`);
+    text('lifeLostCountdown', `RESTART IN ${Math.max(1, Math.ceil(frame.respawnDelay - 1e-6))} SECONDS`);
+    return model;
+  }
   if (intermission) {
+    const result = run.smugglerResult;
+    text('courseHeading', result?.awards.missedGate ? 'LEVEL COMPLETE / EXIT MISSED' : 'LEVEL COMPLETE');
+    model.hidden['#courseAwards'] = !result;
+    if (result) text('courseAwards', smugglerResultLines(result));
     model.hidden['#courseHaul'] = run.stageHaul === null;
     if (run.stageHaul !== null) text('courseHaul', `HAUL ${run.stageHaul} x ${HAUL_PICKUP_POINTS} = +${canyonHaulPoints(run.stageHaul)}`);
+    if (result) text('courseHaul', result.awards.lostCargo ? `HAUL ${result.haul} LOST / +0` : `HAUL ${result.haul} x ${HAUL_PICKUP_POINTS} = +${result.haulPoints}`);
     text('courseScore', `SCORE ${pilot.score}`); text('courseLives', `LIVES ${run.lives}`);
+    text('courseCondition', `SHIELD ${run.skiff.shield}/100 / DAMAGE ${run.skiff.damage}/100`);
     text('courseNext', `LEVEL ${run.stage + 1} IN ${Math.ceil(frame.intermission)}`);
     return model;
   }
@@ -110,7 +131,6 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   if (bonus) model.radarView = COURSE_RADAR_VIEW;
   model.titles['#radar'] = bonus ? 'Course radar: circles are rocks; squares are obstacles; triangles are pickups; crosses are gates. Vertical lines show height.'
     : 'Ship-relative radar: triangles are pickups; crosses are Warp Gates. Vertical lines show height.';
-  const smuggler = run.mode === 'smuggler';
   const invaders = run.mode === 'invaders';
   const score = smuggler && bonus ? smugglerFlightScore(pilot.score, bonus) : pilot.score;
   const canyon = frame.bonus?.canyon;
@@ -125,19 +145,27 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   text('arcadeBest', String(Math.max(run.practice ? 0 : score, frame.profile.records[recordKey])).padStart(6, '0'));
   const flightPoints = smuggler && bonus ? smugglerFlightPoints(bonus) : 0;
   text('creditReadout', invaders ? `NEXT LIFE ${run.nextLifeScore.toLocaleString('en-GB')}` : smuggler ? `FLIGHT ${flightPoints >= 0 ? '+' : ''}${flightPoints}` : `CR ${pilot.credits}`);
-  text('cargoReadout', bonus?.kind === 'canyon' ? `HAUL ${bonus.haul} / +${canyonHaulPoints(bonus.haul)} AT EXIT` : invaders ? '' : smuggler ? `NEXT LIFE ${run.nextLifeScore}` : `CARGO ${pilot.inventory.legalCargo + pilot.inventory.rareMineral} / X ${pilot.inventory.contraband}`);
+  text('cargoReadout', bonus && (smuggler || bonus.kind === 'canyon') ? `HAUL ${bonus.haul} / +${canyonHaulPoints(bonus.haul)} AT EXIT` : invaders ? '' : smuggler ? `NEXT LIFE ${run.nextLifeScore}` : `CARGO ${pilot.inventory.legalCargo + pilot.inventory.rareMineral} / X ${pilot.inventory.contraband}`);
+  text('topLives', String(run.lives));
+  text('topShield', String(bonus?.shield ?? run.skiff.shield));
+  text('topDamage', String(bonus?.damage ?? run.skiff.damage));
+  toggle('#topDamage', 'danger', (bonus?.damage ?? run.skiff.damage) >= 70);
+  text('hullLabel', bonus ? 'SKIFF' : 'HULL');
   text('hullReadout', bonus ? `${bonus.health} / 3` : String(Math.ceil(pilot.hull)));
-  text('shieldReadout', bonus?.kind === 'canyon' ? `${bonus.shield} / 100` : smuggler ? 'RUNNER' : bonus ? 'LOAN SKIFF' : `${Math.ceil(pilot.shield)} / ${pilot.maxShield}`);
+  model.hidden['#skiffDamage'] = !bonus;
+  text('damageReadout', bonus ? `DAMAGE ${bonus.damage}/100` : '');
+  toggle('#damageReadout', 'danger', !!bonus && bonus.damage >= 70);
+  text('shieldReadout', bonus ? `${bonus.shield} / 100` : `${Math.ceil(pilot.shield)} / ${pilot.maxShield}`);
   text('weaponReadout', bonus ? `${bonus.family.toUpperCase()} 1` : `${run.family.toUpperCase()} ${run.tiers[run.family]}`);
   model.titles['#weaponReadout'] = WEAPON_HELP[bonus?.family ?? run.family];
-  text('speedLabel', invaders ? 'WEAPON COOLDOWN' : canyon ? canyon.boosting ? 'BOOST' : 'AUTO SPEED' : asteroids ? 'AUTO SPEED' : 'THROTTLE');
+  text('speedLabel', invaders ? 'WEAPON COOLDOWN' : canyon ? canyon.boosting ? 'BOOST' : 'AUTO SPEED' : asteroids ? asteroids.boosting ? 'BOOST' : 'AUTO SPEED' : 'THROTTLE');
   text('speedReadout', invaders ? frame.shotDelay > 0 ? `${frame.shotDelay.toFixed(1)}s` : 'READY' : canyon ? String(Math.round(canyon.speed)) : asteroids ? String(Math.round(asteroids.speed)) : bonus ? 'AUTO' : frame.definition.kind === 'armada' && !run.cleared ? 'L / R' : throttleReadout(frame.throttle));
   toggle('#speedReadout', 'cooling', invaders && frame.shotDelay > 0);
   text('livesReadout', `LIVES ${run.lives}`);
   text('chainReadout', smuggler ? 'DELIVER HAUL' : `CHAIN x${run.chain.multiplier}`);
   const charge = bonus?.charge ?? run.charge;
   const controls = CONTROL_LAYOUTS[frame.profile.settings.controlScheme];
-  text('chargeReadout', charge >= 100 ? `BLAST READY / ${controls.blast}` : `BLAST ${charge}%${canyon?.penalty ? ' / PAUSED' : ''}`);
+  text('chargeReadout', charge >= 100 ? `BLAST READY / ${controls.blast}` : `BLAST ${charge}%${!smuggler && canyon?.penalty ? ' / PAUSED' : ''}`);
   model.hidden['.reticle'] = armadaLocked;
   text('missionTitle', bonus ? `${Math.ceil(bonus.remaining)} SECONDS` : run.phase === 'recovery' ? `NEXT WAVE IN ${Math.ceil(frame.recovery)}` : run.cleared ? 'MISSION COMPLETE' : armadaLocked ? run.mode === 'invaders' ? 'BREAK THE FORMATION' : 'TRACTOR BEAM LOCKED' : frame.definition.kind === 'boss' ? 'BREAK THE OUTER SYSTEMS' : 'CLEAR THE PIRATE FLIGHTS');
   const arrival = frame.arrivalTime > 0 && run.phase === 'playing' && !bonus;
@@ -149,10 +177,16 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
     : frame.objectiveShip ? `PROTECT ${frame.definition.kind === 'escort' ? 'CONVOY' : 'STATION'}: ${Math.ceil(Math.max(0, frame.objectiveShip.hull))}` : `FLIGHT ${frame.director.flight}/${frame.director.totalFlights} / ${hostiles().length} HOSTILES`;
   text('missionProgress', canyon ? canyon.nextGate >= 18 ? 'FLY THROUGH EXIT' : `GATE ${canyon.nextGate + 1}/18 / +${canyon.nextGatePoints}` : asteroids?.exitApproach ? 'FLY THROUGH THE EXIT GATE' : bonus ? bonus.kind === 'sequence' ? `NEXT MARKER ${Math.min(bonus.targetCount, bonus.nextMarker)} / ${bonus.targetCount}` : `SALVAGE ${bonus.points} / SKIFF ${bonus.health}` : run.cleared ? run.phase === 'recovery' ? `${controls.fire} TO START NOW` : 'HEAD TO THE WARP GATE!' : objective);
   const sequence = bonus?.kind === 'sequence' ? bonus : null;
-  model.hidden['#levelTimer'] = !!bonus && !sequence && !canyon;
+  // Miss deductions are score, not negative cargo. Keep the belt objective literal.
+  if (smuggler && bonus?.kind === 'asteroids' && !asteroids?.exitApproach) text('missionProgress', 'REACH EXIT');
+  model.hidden['#levelTimer'] = !!bonus && !sequence && !canyon && !smuggler;
   text('levelClock', canyon ? `PENALTY ${canyon.penalty}` : sequence ? `SHOTS ${sequence.shotsFired}` : `TIME ${formatStageTime(run)}`);
   const exitLabel = run.mode === 'invaders' || run.mode === 'endless' && run.stage % 5 !== 0 ? 'NEXT' : 'GATE';
   text('timeBonusReadout', canyon && bonus ? `COURSE SCORE ${bonus.points}` : sequence ? `BONUS SCORE ${sequence.points}` : run.timeBonus !== null ? `PAID CR ${run.timeBonus}` : `${exitLabel} +CR ${timeBonusSeconds(run) * TIME_BONUS_RATE}`);
+  if (smuggler && bonus) {
+    text('levelClock', canyon ? `PENALTY ${canyon.penalty}` : 'TIME BONUS');
+    text('timeBonusReadout', `+${Math.max(0, Math.floor(bonus.remaining + 1e-6)) * SMUGGLER_TIME_RATE}`);
+  }
   toggle('#levelClock', 'danger', canyon ? canyon.penalty > 0 : !bonus && run.timeRemaining < 30 && run.timeBonus === null);
   text('messageLog', frame.messages.map(message => message.text).join('\n'));
   toggle('#wantedBanner', 'active', pilot.wanted.active && !bonus);

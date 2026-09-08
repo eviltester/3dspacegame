@@ -67,6 +67,20 @@ for (const kind of ['canyon', 'sequence'] as const) {
       }, '/tests/e2e/fixtures/rendering.ts');
       expect(narrow[0]).not.toBe(narrow[1]);
       await game.info.attach('canyon-narrow', { body: Buffer.from(narrow[0].split(',')[1], 'base64'), contentType: 'image/png' });
+      for (const width of [1440, 390]) {
+        const guns = await page.evaluate(async ({ path, width }) => {
+          const { coursePreview } = await import(path) as typeof import('./fixtures/rendering');
+          return [1, 6].map(level => coursePreview('canyon', width, width === 1440 ? 900 : 844, level, true)[0]);
+        }, { path: '/tests/e2e/fixtures/rendering.ts', width });
+        for (const [index, frame] of guns.entries()) {
+          const body = Buffer.from(frame.split(',')[1], 'base64'), pixels = PNG.sync.read(body).data;
+          let red = 0;
+          for (let i = 0; i < pixels.length; i += 4) if (pixels[i] > 80 && pixels[i] > pixels[i + 1] * 1.5 && pixels[i] > pixels[i + 2] * 1.5) red++;
+          expect(red, 'visible canyon gun lines').toBeGreaterThan(40);
+          await game.info.attach(`canyon-guns-${index === 0 ? 'large' : 'small'}-${width}`, { body, contentType: 'image/png' });
+        }
+        expect(guns[0]).not.toBe(guns[1]);
+      }
     }
     await game.info.attach(kind, { body: buffer, contentType: 'image/png' });
   });

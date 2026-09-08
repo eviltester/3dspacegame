@@ -7,6 +7,10 @@ import type { RunState } from './arcade';
 import type { BonusRunState } from './bonus';
 import { awardScoreLives } from './life-rewards';
 import { canyonHaulPoints } from './canyon-combat';
+import { parseSkiff } from './skiff-vitals';
+import type { SkiffVitals } from './skiff-vitals';
+import { smugglerAwards } from './smuggler-rewards';
+import type { SmugglerResult } from './smuggler-rewards';
 
 export function smugglerLeg(stage: number) {
   // Each belt/canyon pair shares a difficulty. After level eight, new seeds vary
@@ -18,33 +22,43 @@ export function smugglerLeg(stage: number) {
 type FlightPoints = Pick<BonusRunState, 'kind' | 'points'>;
 export function smugglerFlightPoints(state: FlightPoints): number {
   // Canyon rewards/penalties are already score points, not salvage units.
-  return Math.floor(state.points) * (state.kind === 'canyon' ? 1 : 25);
+  return Math.round(state.points * (state.kind === 'canyon' ? 1 : 25));
 }
 export function smugglerFlightScore(score: number, state: FlightPoints): number { return Math.max(0, score + smugglerFlightPoints(state)); }
-export function smugglerCheckpoint(run: RunState, state?: FlightPoints): RunState {
+export function smugglerCheckpoint(run: RunState, state?: FlightPoints & SkiffVitals & Pick<BonusRunState, 'flight'>): RunState {
   if (run.mode !== 'smuggler' || run.phase !== 'playing' || !state) return run;
   const saved = clone(run);
   saved.pilot.score = smugglerFlightScore(run.pilot.score, state);
+  saved.skiff = parseSkiff(state, true);
+  saved.smugglerFlight = clone(state.flight);
   return saved;
 }
-export function smugglerReward(state: Pick<BonusRunState, 'kind' | 'points' | 'health' | 'difficulty' | 'haul'>): number {
-  return smugglerFlightPoints(state) + (state.kind === 'canyon' ? canyonHaulPoints(state.haul) : 0) + 1000 + Math.max(0, state.health) * 100 + (state.difficulty - 1) * 150;
+type SmugglerOutcome = Pick<BonusRunState, 'kind' | 'finished' | 'reason' | 'points' | 'health' | 'shield' | 'damage' | 'difficulty' | 'haul' | 'remaining' | 'flight'>;
+export function smugglerReward(state: SmugglerOutcome): SmugglerResult {
+  const clean = state.reason === 'complete';
+  const awards = smugglerAwards(state.flight, clean, state.kind === 'canyon', state.remaining);
+  if (clean) awards.delivery = 1000 + Math.max(0, state.health) * 100 + (state.difficulty - 1) * 150;
+  return { flight: smugglerFlightPoints(state), haul: state.haul, haulPoints: clean ? canyonHaulPoints(state.haul) : 0,
+    seconds: Math.max(0, Math.floor(state.remaining + 1e-6)), awards };
 }
 
-export function settleSmugglerLeg(run: RunState, state: Pick<BonusRunState, 'kind' | 'finished' | 'reason' | 'points' | 'health' | 'difficulty' | 'haul'>): { score: number; extraLives: number; success: boolean } | null {
+export function settleSmugglerLeg(run: RunState, state: SmugglerOutcome): { score: number; extraLives: number; success: boolean } | null {
   // Only a finished, unbanked leg can settle. The result screen may be loaded again
   // from a save, but cleared/phase prevent it granting points or lives again.
   if (run.mode !== 'smuggler' || run.phase !== 'playing' || run.cleared || !state.finished) return null;
-  const success = state.reason === 'complete', before = run.pilot.score;
+  const success = state.reason === 'complete' || state.reason === 'gateMissed', before = run.pilot.score;
+  const result = success ? smugglerReward(state) : null;
   // Flight points survive a lost life. Only reaching EXIT earns a delivery bonus.
-  run.pilot.score = Math.max(0, before + (success ? smugglerReward(state) : smugglerFlightPoints(state)));
+  run.pilot.score = Math.max(0, before + (result ? result.flight + result.haulPoints + Object.values(result.awards).reduce((sum, points) => sum + points, 0) : smugglerFlightPoints(state)));
   const score = run.pilot.score - before, extraLives = awardScoreLives(run);
   if (!success) {
     loseLife(run);
     return { score, extraLives, success };
   }
   run.stageReward = score;
-  run.stageHaul = state.kind === 'canyon' ? state.haul : null;
+  run.smugglerResult = result;
+  run.skiff = parseSkiff(state, true);
+  run.stageHaul = state.reason === 'complete' ? state.haul : 0;
   run.cleared = true; run.phase = 'cleared';
   return { score, extraLives, success: true };
 }

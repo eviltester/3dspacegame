@@ -32,11 +32,11 @@ describe('menu views', () => {
     expect(view).toContain('1-in-15 chance'); expect(view).toContain('10 shield or 20 unshielded hull');
     expect(MenuViews.briefing(newRun('journey', 1), stageDefinition('journey', 1))[3]).not.toContain('MISS COST');
   });
-  it('keeps Continue active throughout the zero-life countdown', () => {
+  it('shows the final score and active choices without a countdown', () => {
     const run = newRun('journey', 1);
     run.lives = 0;
     const content = MenuViews.gameOver(run)[3]; expect(content).toContain('CONTINUE'); expect(content).not.toContain('disabled');
-    expect(content).toContain('id="deathTimer">10'); expect(content).not.toContain('System resetting');
+    expect(content).toContain('id="finalScore"'); expect(content).not.toContain('deathTimer');
     run.lives = 0; expect(MenuViews.gameOver(run)[3]).toContain('CONTINUE');
   });
   it('shows progression locks and purchased family tiers without changing resources', () => {

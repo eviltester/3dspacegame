@@ -20,7 +20,7 @@ export interface WorldFrame {
 interface WorldEvents {
   collected(drop: CargoDrop, upgraded: boolean): void;
   traded(message: string): void;
-  warning(message: string): void;
+  warning(message: string, cue: 'policeScan' | 'policeDispatch'): void;
 }
 export class WorldInteractions {
   private scanCooldown = 5;
@@ -71,7 +71,7 @@ export class WorldInteractions {
     this.scanCooldown -= dt;
     if (base && position.distanceTo(base.object.position) < 110 && this.scanCooldown <= 0 && run.pilot.inventory.contraband > 0) {
       const result = resolveContrabandScan(run.pilot, `stage-${run.stage}`);
-      run.pilot = result.progress; this.scanCooldown = 8; this.events.warning(result.message.toUpperCase());
+      run.pilot = result.progress; this.scanCooldown = 8; this.events.warning(result.message.toUpperCase(), 'policeScan');
     }
     if (run.pilot.wanted.active && !this.policeDispatched) {
       // One delayed response per loaded stage, separate from existing patrols.
@@ -81,7 +81,7 @@ export class WorldInteractions {
         this.policeDispatched = true;
         const origin = base?.object.position ?? position.clone().add(new THREE.Vector3(180, 0, 0));
         for (let i = 0; i < 3; i += 1) this.actors.add('police', createPoliceModel(), origin.clone().add(new THREE.Vector3(i * 20, 35, 0)), 9, 100);
-        this.events.warning('POLICE DISPATCHED FROM NEAREST STATION');
+        this.events.warning('POLICE DISPATCHED FROM NEAREST STATION', 'policeDispatch');
       }
     }
   }
