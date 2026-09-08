@@ -15,7 +15,7 @@ import { SkiffRepairDrops } from './bonus-repairs';
 import { CANYON_COMBAT_BRIEF, CANYON_MAX_SHIELD, CANYON_REPAIR_BRIEF, canyonTargetPoints } from './canyon-combat';
 import { damageSkiff, parseSkiff } from './skiff-vitals';
 import type { SkiffVitals, SkiffImpact } from './skiff-vitals';
-import { parseSmugglerFlight, smugglerTimeLimit } from './smuggler-rewards';
+import { parseSmugglerFlight, qualifiesBoostFinish, smugglerTimeLimit } from './smuggler-rewards';
 import type { SmugglerFlight } from './smuggler-rewards';
 import { BoostDrive } from './boost';
 import { CanyonHaul } from './canyon-haul';
@@ -291,10 +291,12 @@ export class BonusController {
       // Extra travelled time accelerates the route and exit, not enemy animations or real elapsed time.
       this.boostedTravel += dt * this.asteroidBoost.amount;
       if (!this.smuggler) this.state.remaining = Math.max(0, this.routeDuration - this.travelTime);
-      this.state.flight.topBoost = this.boosting && this.asteroidBoost.amount >= 0.5 - 1e-6;
+      const flight = asteroidFlight(this.travelTime, this.state.difficulty);
+      this.state.flight.topBoost = qualifiesBoostFinish(flight.speed * (1 + this.asteroidBoost.amount),
+        asteroidFlight(this.routeDuration, this.state.difficulty).speed);
       this.offset.x = THREE.MathUtils.clamp(this.offset.x + look.x * 0.13, -38, 38);
       this.offset.y = THREE.MathUtils.clamp(this.offset.y - look.y * 0.13, -24, 30);
-      const t = asteroidFlight(this.travelTime, this.state.difficulty).progress;
+      const t = flight.progress;
       const position = this.path.getPointAt(t);
       camera.position.copy(position).add(new THREE.Vector3(this.offset.x, this.offset.y, 0));
       camera.lookAt(camera.position.clone().add(new THREE.Vector3(0, 0, -1)));

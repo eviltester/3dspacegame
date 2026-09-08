@@ -13,6 +13,7 @@ import { updateCanyonGateVisual } from './rendering/canyon-gates';
 import type { CanyonImpact } from './canyon-combat';
 import { CanyonBarriers } from './canyon-barriers';
 import { BoostDrive } from './boost';
+import { qualifiesBoostFinish } from './smuggler-rewards';
 import { canyonGunMount, canyonGunMuzzle, sizeCanyonGun } from './canyon-gun-mounts';
 import type { CanyonGunMount } from './canyon-gun-mounts';
 import { SoundEvents } from './audio/events';
@@ -30,6 +31,7 @@ export interface CanyonGate {
   motion: number; small: boolean; progress: number; resolved: boolean; passed: boolean; exit: boolean;
 }
 export const CANYON_GATES = 18;
+export const CANYON_EXIT_PROGRESS = 0.985;
 export const CANYON_GUN_WARNING = 0.85;
 export const CANYON_MAX_BOLTS = 24;
 export function canyonSpeed(progress: number, difficulty = 1): number {
@@ -61,7 +63,7 @@ export class CanyonCourse {
   progress = 0;
   speed = 48;
   boosting = false;
-  get topBoost(): boolean { return this.boosting && this.boost.amount >= 0.5 - 1e-6; }
+  get topBoost(): boolean { return qualifiesBoostFinish(this.speed, canyonSpeed(CANYON_EXIT_PROGRESS, this.profile.level)); }
   private readonly boost = new BoostDrive(0.65);
   passed = 0;
   missed = 0;
@@ -92,7 +94,7 @@ export class CanyonCourse {
     // Four half-size openings, spread across the course, with seeded positions.
     const smallSlots = new Set([3, 7, 11, 15].map(start => start + rng.pick([0, 1, 2])));
     for (let i = 0; i <= CANYON_GATES; i++) {
-      const exit = i === CANYON_GATES, progress = exit ? 0.985 : 0.055 + i * 0.05;
+      const exit = i === CANYON_GATES, progress = exit ? CANYON_EXIT_PROGRESS : 0.055 + i * 0.05;
       const small = !exit && smallSlots.has(i);
       const radius = exit ? 10 : (18 - i * 0.6 + (i % 2 ? -0.6 : 0.4)) * profile.gateScale * (small ? 0.5 : 1);
       const base = this.path.getPointAt(progress).add(new THREE.Vector3(exit ? 0 : Math.sin(i * 1.35) * 16, exit ? 1 : Math.cos(i * 1.1) * 9, 0));
@@ -245,7 +247,7 @@ export class CanyonCourse {
   }
   // Integrate distance / accelerating speed from here to the exit at 98.5%.
   // This estimates travel time without boost, rather than imposing a fixed timer.
-  get remaining(): number { return Math.max(0, this.length / (96 * this.profile.flightScale) * Math.log((48 + 96 * 0.985) / (48 + 96 * this.progress))); }
+  get remaining(): number { return Math.max(0, this.length / (96 * this.profile.flightScale) * Math.log((48 + 96 * CANYON_EXIT_PROGRESS) / (48 + 96 * this.progress))); }
   get snapshot() {
     return { progress: this.progress, speed: this.speed, boosting: this.boosting, offset: this.offset.toArray(), passed: this.passed,
       missed: this.missed, penalty: this.penalty, nextGate: this.nextGate, fired: this.fired,

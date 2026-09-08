@@ -1,6 +1,15 @@
 import { expect, it } from 'vitest';
-import { parseSmugglerFlight, parseSmugglerResult, smugglerAwards, smugglerResultLines, smugglerTimeLimit } from './smuggler-rewards';
+import { parseSmugglerFlight, parseSmugglerResult, qualifiesBoostFinish, smugglerAwards, smugglerResultLines, smugglerTimeLimit } from './smuggler-rewards';
 import { BoostDrive } from './boost';
+
+it.each([112, 142.56, 166.88, 212.4144])('Boost Finish requires at least twenty above unboosted EXIT speed %s', cruise => {
+  for (const extra of [0, 19.999, 20, 20.001, 50]) {
+    const flight = { ...parseSmugglerFlight(), topBoost: qualifiesBoostFinish(cruise + extra, cruise) };
+    expect(flight.topBoost).toBe(extra >= 20);
+    expect(smugglerAwards(flight, true, false, 0).boostFinish).toBe(extra >= 20 ? 5000 : 0);
+    expect(smugglerAwards(flight, false, false, 0).boostFinish).toBe(0);
+  }
+});
 
 it.each([0, 0.5, 1, 26, 40, 60, 74])('clock for a %s second cruise includes full-boost ramp and twenty seconds', cruise => {
   const drive = new BoostDrive(0.65); let elapsed = 0, travelled = 0;

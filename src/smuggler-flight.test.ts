@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { afterEach, expect, it, vi } from 'vitest';
-import { BonusController } from './bonus';
+import { ASTEROID_DURATION, asteroidFlight, BonusController } from './bonus';
+import { CANYON_EXIT_PROGRESS, canyonSpeed } from './canyon';
 import { freshSkiff } from './skiff-vitals';
 import { parseSmugglerFlight, smugglerAwards } from './smuggler-rewards';
 
@@ -30,6 +31,36 @@ for (const kind of ['asteroids', 'canyon'] as const) for (const difficulty of [1
     if (boost) { expect(bonus.state.remaining).toBeGreaterThanOrEqual(20); expect(bonus.state.remaining).toBeLessThan(21.1); }
     else expect(bonus.state.remaining).toBeLessThan(20);
     const snapshot = structuredClone(bonus.state); bonus.step(4, { x: 0, y: 0 }, camera); expect(bonus.state).toEqual(snapshot);
+  });
+}
+for (const kind of ['asteroids', 'canyon'] as const) for (const difficulty of [1, 8]) {
+  it(`${kind} D${difficulty} full boost early in the level is not fast enough for Boost Finish`, () => {
+    const { bonus, camera } = course(kind, difficulty); clearHazards(bonus);
+    for (let i = 0; i < 60; i++) bonus.step(1 / 60, { x: 0, y: 0, boost: true }, camera);
+    expect(bonus.state.flight.topBoost).toBe(false);
+  });
+  it.each([15, 25])(`${kind} D${difficulty} checks actual EXIT speed at roughly +%s, even after releasing boost`, extra => {
+    const { bonus, camera } = course(kind, difficulty); clearHazards(bonus);
+    const cruise = kind === 'canyon' ? canyonSpeed(CANYON_EXIT_PROGRESS, difficulty) : asteroidFlight(ASTEROID_DURATION, difficulty).speed;
+    const exitProgress = kind === 'canyon' ? CANYON_EXIT_PROGRESS : 1;
+    const dt = 1 / 120;
+    let holding = false;
+    for (let i = 0; i < 10000 && !bonus.state.finished; i++) {
+      const flight = bonus.canyon ?? bonus.asteroidRun!;
+      const offset = bonus.canyon?.offset ?? new THREE.Vector2(camera.position.x, camera.position.y);
+      const target = bonus.canyon ? new THREE.Vector2(0, 1) : new THREE.Vector2(...bonus.asteroidRun!.gate.position.slice(0, 2));
+      // Approach with partial boost, then coast through the final two simulation ticks.
+      const distance = (exitProgress - flight.progress) * bonus.path.getLength();
+      holding = flight.progress > 0.9 && flight.speed < cruise + extra && distance > flight.speed * dt * 2;
+      bonus.step(dt, { x: (target.x - offset.x) / 0.13, y: -(target.y - offset.y) / 0.13, boost: holding }, camera);
+    }
+    const speed = (bonus.canyon ?? bonus.asteroidRun!).speed;
+    expect(bonus.state.reason).toBe('complete');
+    expect(holding).toBe(false);
+    expect(speed - cruise).toBeGreaterThan(extra - 4);
+    expect(speed - cruise).toBeLessThan(extra + 4);
+    expect(bonus.state.flight.topBoost).toBe(extra >= 20);
+    expect(smugglerAwards(bonus.state.flight, true, kind === 'canyon', 0).boostFinish).toBe(extra >= 20 ? 5000 : 0);
   });
 }
 it.each(['asteroids', 'canyon'] as const)('%s missed exit is a finish, not a life-ending crash, even after the bonus clock expires', kind => {

@@ -8,6 +8,7 @@ export interface SmugglerFlight {
   enemies: boolean;
   gatesPassed: number;
   gatesMissed: number;
+  /** Current speed meets the Boost Finish threshold, independent of held inputs. */
   topBoost: boolean;
 }
 export function parseSmugglerFlight(value?: unknown): SmugglerFlight {
@@ -19,6 +20,11 @@ export function parseSmugglerFlight(value?: unknown): SmugglerFlight {
 }
 export const SMUGGLER_TIME_RATE = 500;
 export const SMUGGLER_TIME_ALLOWANCE = 20;
+export const BOOST_FINISH_SPEED_MARGIN = 20;
+/** Compare against the level's unboosted EXIT speed, not its earlier, slower cruise. */
+export function qualifiesBoostFinish(speed: number, unboostedFinishSpeed: number): boolean {
+  return speed >= unboostedFinishSpeed + BOOST_FINISH_SPEED_MARGIN;
+}
 // Boost ramps from cruise to +50% at 0.65/second. Both courses accelerate by
 // distance/travel time, so this integral converts their unboosted route duration.
 export function smugglerTimeLimit(cruiseSeconds: number): number {
