@@ -8,6 +8,7 @@ import { JOURNEY_STAGE_COUNT } from './arcade';
 import { endlessDifficulty } from './endless-difficulty';
 import { invaderStage } from './invaders';
 import { smugglerLeg } from './smuggler';
+import { tunnelEncounter } from './tunnels/encounters';
 import * as THREE from 'three';
 
 export function crossedGate(previous: THREE.Vector3, next: THREE.Vector3, position: THREE.Vector3, rotation: THREE.Quaternion, radius = 28): boolean {
@@ -51,6 +52,8 @@ export const HULL: Record<EnemyArchetype, number> = { raider: 48, flanker: 52, d
 export function stageDefinition(mode: GameMode, number: number): StageDefinition {
   const n = Math.min(mode === 'journey' ? JOURNEY_STAGE_COUNT : Infinity, Math.max(1, Math.floor(number)));
   if (mode === 'invaders') return invaderStage(n);
+  if (mode === 'tunnels') return { number: n, kind: 'course', title: `TUNNEL ${n}`, chapter: 1, bossParts: n % 10 === 0 ? 2 : 0,
+    objective: 'Defend the edge. Destroy the assault and collect cargo.', waves: [], speedScale: tunnelEncounter(n).shotSpeed, attackerCap: 6, difficulty: endlessDifficulty(n) };
   if (mode === 'smuggler') {
     const leg = smugglerLeg(n);
     return { number: n, kind: 'course', title: leg.kind === 'asteroids' ? 'ASTEROID PASSAGE' : 'CANYON PASSAGE', chapter: 1, bossParts: 0,

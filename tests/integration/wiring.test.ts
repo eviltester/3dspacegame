@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { GameHarness } from './fixtures/game';
 import { WEAPON_HELP } from '../../src/weapons';
 import { LEVEL_WARP_KEY } from '../../src/level-warp';
-import { SAVE_V2 } from '../../src/arcade';
+import { SAVE_V2, freshProfile } from '../../src/arcade';
 import { ShotAccuracy } from '../../src/combat/accuracy';
 import { BonusController } from '../../src/bonus';
 import * as radar from '../../src/radar';
@@ -81,6 +81,30 @@ it('saved mouse sensitivity initializes flight input and the control slider chan
   expect(game.text('#mouseValue')).toBe('1.7x');
   const reloaded = new GameHarness(); expect(reloaded.app.input.mouseSensitivity).toBe(1.7);
 });
+it.each(['mouse', 'wasd', 'arrows'] as const)('saved %s preference enables mouse, WASD and arrow movement together in Invaders', async scheme => {
+  const profile = freshProfile(); profile.settings.controlScheme = scheme;
+  localStorage.setItem(SAVE_V2, JSON.stringify(profile));
+  const game = new GameHarness(); await game.action('controls');
+  expect(document.querySelectorAll('.control-select button')).toHaveLength(2);
+  expect(document.querySelector('[data-action="controls:mouse"]')?.getAttribute('aria-pressed')).toBe('true');
+  expect(document.querySelector('#mouseSensitivity')).not.toBeNull();
+  await game.action('title'); await game.start('invaders');
+  const throttle = game.state().throttle;
+  for (const code of ['KeyD', 'ArrowRight']) {
+    const before = game.state().position[0];
+    window.dispatchEvent(new KeyboardEvent('keydown', { code })); game.step(1 / 60);
+    window.dispatchEvent(new KeyboardEvent('keyup', { code }));
+    expect(game.state().position[0]).toBeGreaterThan(before);
+  }
+  const before = game.state().position[0];
+  window.dispatchEvent(Object.assign(new Event('mousemove'), { movementX: -10, movementY: 0 })); game.step(1 / 60);
+  expect(game.state().position[0]).toBeLessThan(before);
+  expect(game.state().throttle).toBe(throttle);
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyA' }));
+  await game.action('pause'); await game.action('unpause');
+  const pausedPosition = game.state().position; game.step(1 / 60);
+  expect(game.state().position).toEqual(pausedPosition);
+});
 it('held boost reaches the asteroid and canyon controllers and release returns toward automatic speed', async () => {
   const game = new GameHarness(); await game.start('smuggler');
   for (const kind of ['asteroids', 'canyon']) {
@@ -133,6 +157,71 @@ it('weapon switching and Invaders extra lives never use the pickup chime', async
   game.debug.giveScore(35000);
   expect(cue).toHaveBeenCalledExactlyOnceWith('extraLife'); cue.mockClear();
   game.debug.giveScore(1); expect(cue).not.toHaveBeenCalled();
+});
+it('Invaders empty shields lose a life on the next hit, with shield pickups and protected live respawn', async () => {
+  const game = new GameHarness(); await game.start('invaders'); game.step(3);
+  game.debug.giveScore(1234); game.debug.damagePlayer(1000); game.step(0);
+  expect(game.state()).toMatchObject({ shield: 0, lives: 3, score: 1234 });
+  expect(game.text('#topShield')).toBe('0');
+  expect(document.querySelector<HTMLElement>('#survivalStats')!.hidden).toBe(false);
+  expect(document.querySelector<HTMLElement>('.bottom-strip > div:nth-child(2)')!.hidden).toBe(true);
+  expect(document.querySelector<HTMLElement>('#livesReadout')!.hidden).toBe(true);
+  expect(document.querySelector<HTMLElement>('.bottom-strip > div:first-child')!.hidden).toBe(true);
+  game.debug.grantCargo('shieldCell'); game.step(0);
+  expect(game.state()).toMatchObject({ shield: 30, lives: 3 });
+  expect(game.text('#topShield')).toBe('30');
+  game.step(0.3); game.debug.damagePlayer(1000);
+  expect(game.state()).toMatchObject({ shield: 0, lives: 3 });
+  game.step(0.3); game.debug.damagePlayer(1); game.step(0.02);
+  expect(game.state()).toMatchObject({ shield: 100, lives: 2, score: 1249, menu: '', phase: 'playing' });
+  expect(game.text('#topLives')).toBe('2');
+  expect(game.text('#topShield')).toBe('100');
+  expect(game.state().respawn.protection).toBeGreaterThan(2.9);
+  game.debug.damagePlayer(1000); expect(game.state().shield).toBe(100);
+});
+it('Invaders shares one wave blast across keyboard and mouse, persists it, and unlocks it on the next wave', async () => {
+  const game = new GameHarness(); await game.start('invaders'); game.debug.primeBlast();
+  const sound = vi.spyOn(game.app.sound, 'blast');
+  const key = (code: string) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { code }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { code }));
+  };
+  key('KeyX'); game.step(0);
+  expect(sound).toHaveBeenCalledOnce(); expect(game.text('#chargeReadout')).toContain('BLAST USED');
+  expect(game.debug.getProfile().checkpoints.invaders?.blastUsed).toBe(true);
+  game.debug.primeBlast(); key('KeyK');
+  document.querySelector('#viewport canvas')!.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
+  game.step(0);
+  expect(sound).toHaveBeenCalledOnce(); expect(game.state().charge).toBe(100);
+  expect(game.text('#chargeReadout')).toBe('BLAST USED / 100%');
+  expect(game.text('#messageLog')).toContain('AVAILABLE NEXT WAVE');
+  game.debug.forcePlayerDeath(); game.step(0.02); key('KeyX');
+  expect(sound).toHaveBeenCalledOnce();
+  await game.action('pause'); await game.action('title'); await game.action('resumeRun'); await game.action('launch');
+  game.debug.primeBlast(); key('KeyK'); expect(sound).toHaveBeenCalledOnce();
+  game.debug.finishEncounter(); game.step(0.02); await game.action('nextWave'); game.step(0);
+  expect(game.state().stage).toBe(2); expect(game.state().charge).toBe(100);
+  expect(game.text('#chargeReadout')).toContain('BLAST READY');
+  key('KeyX'); expect(sound).toHaveBeenCalledTimes(2);
+});
+it.each([['KeyJ', 'KeyK'], ['KeyZ', 'KeyX']])('Invaders accepts %s fire and %s blast with the default Mouse layout', async (fire, blast) => {
+  const game = new GameHarness(); await game.start('invaders');
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: fire })); game.step(1 / 60);
+  expect(game.state().stats.shots).toBe(1);
+  window.dispatchEvent(new KeyboardEvent('keyup', { code: fire }));
+  game.debug.primeBlast();
+  const sound = vi.spyOn(game.app.sound, 'blast');
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: blast }));
+  expect(sound).toHaveBeenCalledOnce(); expect(game.state().charge).toBeLessThan(100);
+  window.dispatchEvent(new KeyboardEvent('keyup', { code: blast }));
+  game.step(1 / 60); expect(game.text('#timeBonusReadout')).toMatch(/^TIME BONUS \+CR /);
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: fire }));
+  await game.action('pause');
+  const shots = game.state().stats.shots; game.debug.primeBlast();
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: blast }));
+  game.step(1); expect(game.state().stats.shots).toBe(shots); expect(game.state().charge).toBe(100);
+  await game.action('unpause'); game.step(0.5);
+  expect(game.state().stats.shots).toBe(shots); expect(game.state().charge).toBe(100);
 });
 it('Smuggler payout and extra life announce independently, without replaying a paid result', async () => {
   const game = new GameHarness(); await game.start('smuggler'); game.debug.giveScore(34999);

@@ -73,7 +73,7 @@ export class GameDriver {
   async warpStage(stage: number, mode: GameMode = 'journey'): Promise<void> {
     if (mode === 'journey') { await this.page.locator('#warpStage').selectOption(String(stage)); await this.action('warpJourney'); }
     else {
-      const [field, action] = { endless: ['warpWave', 'warpEndless'], invaders: ['warpInvaders', 'warpInvaders'], smuggler: ['warpSmuggler', 'warpSmuggler'] }[mode];
+      const [field, action] = { endless: ['warpWave', 'warpEndless'], invaders: ['warpInvaders', 'warpInvaders'], smuggler: ['warpSmuggler', 'warpSmuggler'], tunnels: ['warpTunnels', 'warpTunnels'] }[mode];
       await this.page.locator(`#${field}`).fill(String(stage)); await this.action(action);
     }
   }

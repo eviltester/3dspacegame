@@ -3,9 +3,18 @@ import type { Effect } from './effect-types';
 // Different rhythms and timbres identify events, not just different pitches of
 // the same beep. Frequent score ticks stay short; important rewards can ring out.
 export const FEEDBACK_EFFECTS = {
+  // Repeated by the tunnel beacon while a collectible remains on screen.
+  pickupNearby: { duration: 0.12, voices: [
+    { wave: 'sine', notes: [1200], level: 0.55, decay: 4 },
+    { wave: 'sine', notes: [2400], level: 0.08, duration: 0.05, decay: 5 }
+  ] },
   policeDispatch: { duration: 0.68, voices: [
     { wave: 'pulse', notes: [310, 620, 310, 620], duty: 0.35, level: 0.35, decay: 0.8 },
     { wave: 'noise', notes: [2400], level: 0.12, duration: 0.05, decay: 4 }
+  ] },
+  policeArrival: { duration: 1.2, voices: [
+    { wave: 'triangle', notes: [640, 960, 640, 960], level: 0.55, decay: 0.45 },
+    { wave: 'pulse', notes: [320, 480, 320, 480], duty: 0.35, level: 0.14, decay: 0.6 }
   ] },
   policeScan: { duration: 0.45, voices: [
     { wave: 'triangle', notes: [240, 300, 360, 420, 480, 540, 600], level: 0.55, gated: true, decay: 0.5 }

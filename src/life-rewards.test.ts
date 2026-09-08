@@ -65,12 +65,13 @@ describe('continuous combat lives and repairs', () => {
     loseCombatLife(run); expect(run.lives).toBe(1);
     loseCombatLife(run); expect(run.lives).toBe(0); expect(run.phase).toBe('gameover');
   });
-  it('repairs hull and shields with collected cells, clamped to capacity', () => {
-    const run = newRun('invaders', 1); run.pilot.hull = 40; run.pilot.shield = 20;
+  it.each(['journey', 'endless', 'invaders'] as const)('%s repair cells respect mode-specific condition and capacity', mode => {
+    const run = newRun(mode, 1); run.pilot.hull = 40; run.pilot.shield = 20;
     pickup(run, { type: 'shieldCell', amount: 1 });
-    expect(run.pilot.hull).toBe(70); expect(run.pilot.shield).toBe(50);
+    expect(run.pilot.hull).toBe(mode === 'invaders' ? 40 : 70); expect(run.pilot.shield).toBe(50);
+    expect(run.pilot.score).toBe(15);
     pickup(run, { type: 'shieldCell', amount: 9 });
-    expect(run.pilot.hull).toBe(100); expect(run.pilot.shield).toBe(100);
+    expect(run.pilot.hull).toBe(mode === 'invaders' ? 40 : 100); expect(run.pilot.shield).toBe(100);
   });
   it('Invaders cannot dock or buy, and waves do not auto-repair the shield', () => {
     const run = newRun('invaders', 1); run.phase = 'recovery'; run.cleared = true;

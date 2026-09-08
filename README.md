@@ -9,32 +9,33 @@ Programming: Codex
 
 Run `npm install`, then `npm run dev`, and open the local address printed by Vite.
 
-- Mouse: unrestricted local-axis steering in space; lateral movement in armadas.
+- Mouse, WASD and arrow keys work together: unrestricted steering in space, lateral movement in armadas.
 - Hold left click: fire. Quick clicks also fire.
 - Mouse wheel: adjust maintained thrust through forward, stop, and reverse. Scroll down once more after stop to back up; reverse tops out at 90, forward at 180.
 - Right click: defensive blast at 100% charge, including bonus sorties. To leave a bonus early, pause and choose Exit Bonus Safely.
 - 1 / 2 / 3: select Pulse / Spread / Lance during flight. Tab or a short mouse-wheel click cycles in that order.
-- Hold the mouse-wheel button for 0.6 seconds, or press Esc: pause and release the mouse. A long hold does not change weapons. All menus support mouse clicks and Tab/Shift+Tab followed by Enter or Space.
-- With the default Mouse layout, optional keys remain W/S throttle (hold S past stop to reverse), A/D roll, Shift boost, Space fire and Esc pause.
+- Hold the mouse-wheel button for 0.6 seconds, or press Esc: pause and release the mouse. A long hold does not change weapons. Up/Down or Tab/Shift+Tab selects menu options; Enter, Space, J or Z confirms. Mouse clicks also work. Settings fields keep their normal editing keys.
+- R/F adjusts throttle (hold F past stop to reverse), Q/E rolls, Shift boosts and Esc pauses.
+- In every mode and steering layout, hold Space, J or Z to fire; K or X uses the charged blast.
 
-Open **Controls** from the title or pause menu to choose and save a control layout:
+Open **Controls** from the title or pause menu to see the bindings and adjust sensitivity. Mouse and keyboard are available together; Touch / Tilt has its own device option.
 
-The Mouse section has a saved sensitivity slider from 0.5x to 2.0x (default 1.0x). It changes mouse steering/aiming only; keyboard and tilt sensitivity remain independent.
+The mouse sensitivity slider is saved from 0.5x to 2.0x (default 1.0x). It changes mouse steering/aiming only; keyboard and tilt sensitivity remain independent.
 
-| Action | WASD layout | Arrows + Z/X (left-handed) |
-| --- | --- | --- |
-| Pitch up / down | W / S | Up / Down |
-| Turn left / right | A / D | Left / Right |
-| Hold to fire | J (or Space) | Z (or Space) |
-| Charged blast | K | X |
-| Increase / decrease throttle, through stop into reverse | R / F | R / F |
-| Roll left / right | Q / E | Q / E |
-| Boost | Shift | Shift |
-| Select Pulse / Spread / Lance | 1 / 2 / 3 | 1 / 2 / 3 |
-| Cycle weapon | Tab | Tab |
-| Pause | Esc | Esc |
+| Action | Controls |
+| --- | --- |
+| Pitch up / down | Mouse / W / S / Up / Down |
+| Turn left / right | Mouse / A / D / Left / Right |
+| Hold to fire | Left click / J / Z / Space |
+| Charged blast | Right click / K / X |
+| Increase / decrease throttle, through stop into reverse | Wheel / R / F |
+| Roll left / right | Q / E |
+| Boost | Shift |
+| Select Pulse / Spread / Lance | 1 / 2 / 3 |
+| Cycle weapon | Tab / wheel click |
+| Pause | Esc / hold wheel |
 
-Keyboard layouts work without pointer lock. In armadas the steering keys slide left/right and vertical movement is locked; in bonus skiffs they move or aim the craft. Canyon throttle remains automatic, but Shift still boosts. Focus loss and hidden tabs pause every layout and clear held inputs. Briefings and the blast-ready prompt show the selected controls. Tab navigates menus when paused, and cycles weapons only during play.
+Desktop flight captures mouse motion; keyboard controls also work if capture is unavailable. In armadas the steering keys slide left/right and vertical movement is locked; in bonus skiffs they move or aim the craft. Canyon throttle remains automatic, but Shift still boosts. Focus loss and hidden tabs pause every device and clear held inputs. Tab navigates menus when paused, and cycles weapons only during play.
 
 ### Phone And Tablet Controls
 
@@ -52,9 +53,27 @@ Pirate reinforcements arrive with a brief contracting warp ring, a dedicated arr
 The 3D radar is relative to the ship's current heading and flight plane. Solid stems rise to contacts above you; dashed stems descend to contacts below. Cargo keeps its triangle symbol and Warp Gates keep their cross symbol.
 
 Armada briefings explain the tractor-beam trap. These stages use an elevated, angled view of the player's ship and receding enemy rows. Later armadas increase from four ships per flight to fourteen, using up to three rows with all columns inside firing reach. Total hostiles still cap at eighteen and attackers at six. Mouse movement slides the ship along its defensive lane; destroying the armada releases the beam and restores cockpit flight. Dropped salvage drifts into the lane at 24 units per second, so it can be caught during combat. Protected cargo waits at the lane if missed; ordinary drops pass through, and contraband still requires direct contact.
-- Ships & Objects changes the displayed model every five seconds. Its arrows, or the left/right keys, browse immediately.
+- Info Deck changes the displayed model every five seconds. Its arrows, or the left/right keys, browse immediately.
 
 ## Modes
+
+**Tempestuous Tunnels** defends the near edge of a twelve-lane tunnel. Move horizontally with mouse, keyboard or touch/tilt; closed shapes wrap all the way around, while open shapes stop at their ends. Vertical steering, throttle and boost are inactive. Hold fire, switch between Pulse/Spread/Lance, and use the charged blast with the normal controls.
+
+Keyboard lane controls work in every control layout: A/D or Left/Right move one lane per tap and repeat while held. Space/J/Z fire; K/X trigger the charged blast. Enemy models gently flash red before firing at your position when the warning began. Those shots do not follow subsequent movement. After the cargo-collection window, the camera dives down the centre and the tunnel breaks into spinning panels and particle bursts before the score summary.
+
+Ten original shapes repeat with changing colours and seeded assaults. Pirates charge, change lanes, dive, sweep and lay mines; escaped enemies become edge pursuers. Police fight pirates unless you attack protected ships or evade a contraband fine. Every tenth tunnel includes a carrier with two guns shielding its core. Shootable asteroids split into neighbouring lanes; walls and fixed/retracting pillars force you to move. Attack and lane-change warnings last at least 0.9 seconds.
+
+Enemies at the edge chase and fire across lanes at the same time. Their bolts remain visible, dodgeable and shootable. The last three hostiles recover faster between shots, with the final survivor firing most frequently; the warning flash and staggered attack limits still apply.
+
+Shooting police calls a finite response of up to ten extra officers per tunnel, arriving in pairs two seconds apart after the eight-second dispatch delay. Ordinary trader/contraband warrants call two officers; attacking police raises that total to ten. Arriving wanted police hold at the far bottom until their first staggered, warned shot, then advance. Their arrival sounds a distinct siren. The response waits for space within the eighteen-hostile cap; repeated hits, life loss and reloading cannot refill it. Once all ten have arrived, extra spawning stops. Wanted status lasts until the next tunnel, and reinforcements never become required targets.
+
+Asteroid fragments scatter sideways immediately; one in four surges towards the player at triple fragment speed after a 0.9-second warning. Open ends scatter fragments back into the track. Mines flash red, arm for 0.9 seconds, then explode within 32 depth units and 0.8 lanes of the player, removing 40 shield or destroying an unshielded life. Shooting a mine from outside that range destroys it safely. Cargo, debris and friendly traffic pass off the edge; only hostile armed ships become edge pursuers. Approaching pickups sound a repeating ping-ping-ping until collected or passed, sharing one rhythm regardless of pickup count.
+
+Cargo is collected in its lane and converted to points after the assault. Crates release cargo with a 20% chance. Contraband stays aboard until a black-market delivery every fifth tunnel; police scans warn before confiscation and a 140-point fine, or pursuit when the fine cannot be paid. Weapon cores and shield pickups replace shopping. Start with three lives and 100 shield, with an extra life every 35,000 points. Shields carry between tunnels. A shielded hit can empty the shield but cannot cost a life; the next unshielded hit costs one life. Blue pickups restore 20 shield and pink pickups refill it. Losing a life preserves score, equipment and defeated enemies; a four-second countdown precedes a protected respawn with full shields.
+
+Tunnel tier-one firing cooldowns are 0.22 seconds for Pulse, 0.65 for Spread and 1.00 for Lance. Each upgrade shortens these by 8% of the base time. Switching weapons does not bypass the wait; bolt travel speeds are unchanged.
+
+Misses cost no points in this mode. Spread counts three individual shots; Lance counts one accuracy hit even when piercing multiple targets. Accuracy of 80%, 90% and 100% pays 500, 1,000 and 2,000 points respectively; zero shots earn no accuracy bonus. After clearing, three seconds of safe cargo collection precede a three-second results display. The title has separate tunnel records and resume; Level Warp supports tunnel practice. Saves retain the exact encounter and pending projectile outcomes.
 
 Arcade Journey has 99 stages. The first twelve stages introduce patrol, rescue, armada, carrier; ambush, escort, diving armada, shield carrier; station defence, fleet assault, elite armada, command carrier. Stages 13-96 remix those encounter types with shifted enemy combinations, more flights and shorter arrival gaps. Stages 97-99 close with an ambush, a fleet assault and the Terminal Carrier. Ordinary fighter health stays fixed; hostiles cap at 18, attackers at six and projectile-speed growth at 35%.
 
@@ -67,6 +86,8 @@ Enemy hull and damage stay fixed. Fighters acquire three-shot fans at wave 75, a
 Invaders is an uninterrupted formation campaign. The defensive lane stays locked between waves. Original alien saucers march, swoop, converge from both flanks and weave; the pattern changes each wave. Flights grow from eight to eighteen aliens, then additional flights keep increasing the total roster. Movement and firing pressure rise every wave within readable limits. Clear a wave to begin the next immediately, or use the short recovery interval. Collect weapon cores and repair cells during combat. Every 35,000 points awards an extra life, capped at five, with the next milestone visible on the HUD. Crossed milestones are consumed even at the cap.
 
 Invaders rewards deliberate aim. Tier-one cooldowns are 0.60 seconds for Pulse, 1.00 for Spread and 1.40 for Lance; each upgrade shortens these by 8% of the base time. Switching weapons does not bypass cooldown. Aliens take staggered firing turns, with individual cooldowns starting at 5.6 seconds and gradually shortening as waves advance. Each attack keeps its visible warning. The HUD shows weapon readiness and the current wave's accuracy, hits, shots and misses; accuracy remains visible during recovery.
+
+Invaders allows one charged blast per wave. Charge still builds after use and carries into the next wave. The HUD shows BLAST USED alongside the charge percentage until the next wave; life loss and save/resume do not grant another use. Starting a new run or continuing from game over restores the allowance.
 
 Every missed Invaders bolt costs 100 points with more than ten live aliens, 75 with six to ten, or 50 with five or fewer. The count is captured when the bolt fires, and score is floored at zero. Spread counts as three shots: one hit and two misses means 33% accuracy and two separate penalties. Hitting an alien or intercepting hostile fire counts as a hit; Lance can hit several targets but earns one accuracy hit per bolt. Airborne misses settle at their original prices when the wave clears. Each new wave starts fresh accuracy counters; respawning preserves the current wave's score and accuracy.
 
@@ -82,7 +103,7 @@ Smuggler level clocks allow the full-boost route time (including acceleration fr
 
 Smuggler radar shows the live course: circles for rocks/fragments, squares for crates and solid obstacles, triangles for salvage/repair pickups, faction-coloured ship blips for guns and passing traffic, and short red strokes for incoming gunfire. A cross marks the next canyon gate or asteroid EXIT, pinned at the radar edge when distant. The course view covers 500 units ahead with magnified left/right and height separation, solid stems above and dashed stems below the skiff. Objects more than 50 units behind disappear. Collected/destroyed objects and fully retracted pillars disappear immediately; moving contacts follow their actual positions. Free-space radar retains its 650-unit scale.
 
-The title has four mode choices with live, original vector previews. Smuggler's preview alternates the actual asteroid and canyon courses. Previews do not affect saves or scores. Controls, weapon descriptions, high scores and Ships & Objects each have their own menu.
+The title has five mode choices with live, original vector previews. Selected mode details appear above the preview, with the starting weapon description below it. Smuggler's preview alternates the actual asteroid and canyon courses. Previews do not affect saves or scores. Controls, High Scores and Info Deck share one menu row; Play, Resume and New Run appear beneath the previews.
 
 Each combat stage or wave has a two-minute bonus clock. Entering the Warp Gate pays 10 CR per whole second remaining, with the potential payout shown beside the countdown. The clock keeps running after the objective is complete: grab more cargo or leave quickly for a larger time bonus. Zero ends the bonus, not the mission. Ordinary Attack Challenge waves and all Invaders waves pay when the next wave starts, so clicking early beats waiting through recovery. Briefings, pauses, shops and optional bonus sorties do not consume main-level time. Gate awards are saved immediately and paid only once, even if reloaded during warp. Smuggler Run uses course timers and delivery points instead of trading credits.
 
@@ -98,7 +119,7 @@ Destroyed ships shed spinning wireframe hull panels in their faction colours. Af
 
 Legal cargo sells at stations and docks; contraband sells only at the black market. The normal collection magnet is 20 units, upgraded to 35. Contraband always requires deliberate close collection. Police collect contraband only; civilians avoid it; essential mission cargo is protected.
 
-Repair cells restore 30 hull and 30 shield, capped at the ship's capacities. After the guaranteed opening weapon core, each Invaders salvage drop has a 1-in-15 chance of being a repair cell; the rest are equally split between weapon cores and score-bearing cash salvage. Capped weapon cores award 200 extra points. A normal alien bolt removes 10 shield or, when unshielded, 20 hull; any damage overflowing a partial shield is doubled against hull. Hull and shield recovery in Invaders comes from pickups or a respawn, with damage carried between waves. Other modes keep their normal damage and loot rules.
+Repair cells restore 30 hull and 30 shield, capped at the ship's capacities; in Invaders they restore only shield. After the guaranteed opening weapon core, each Invaders salvage drop has a 1-in-15 chance of being a repair cell; the rest are equally split between weapon cores and score-bearing cash salvage. Capped weapon cores award 200 extra points. Invaders survival is shield-only: a normal alien bolt removes 10 shield, a partial shield absorbs the whole hit, and the next hit while shields are empty costs one life. Pickups or a respawn restore shields, with shield condition carried between waves. Other modes keep their normal damage and loot rules.
 
 Dock prices: tier 2 350 CR, tier 3 800 CR, repairs 150 CR, shield capacity 300 CR, magnet 200 CR. The opening stage guarantees at least 385 CR at completion. Tier 3 opens at Journey stage 5 or Attack Challenge/Invaders wave 8. Fresh runs gain no permanent starting power; unlocks only offer starting weapon choices.
 
@@ -114,11 +135,11 @@ Canyon sorties accelerate automatically from 48 to 144 speed on difficulty 1, ri
 
 Each missed canyon gate raises the active penalty by 200 and deducts that amount: 200, 400, 600, and so on. A successful gate pays its reward and reduces the penalty by 200, down to zero, without refunding prior deductions. Misses neither end the flight nor spend lives. While the penalty is active, the next opening pulses vivid green and hits/interceptions cannot recharge the blast; an already charged blast can still be used. The opening's visual size and collision radius remain fixed during the pulse. The final wall has a labelled EXIT opening: fly through to finish or hit the wall. Optional sorties retain the main ship and settle the positive net course score once; Smuggler flights apply both earnings and deductions to the ongoing score.
 
-The canyon grows from 52 shootable amber obstacles and 26 red guns to 80 obstacles and 40 guns. Later guns recover faster and their shots accelerate by up to 35%, but the warning stays at 0.85 seconds and no more than four guns engage together. They lock an intercept before the warning, then fire toward that locked point; change course to evade or shoot back. Hostile bolts are transparent and interceptable for 10% blast charge, and blasts clear nearby gunfire. Geometry leaves a traversable moving-gate corridor. Green gates, guns and obstacles also appear in Ships & Objects.
+The canyon grows from 52 shootable amber obstacles and 26 red guns to 80 obstacles and 40 guns. Later guns recover faster and their shots accelerate by up to 35%, but the warning stays at 0.85 seconds and no more than four guns engage together. They lock an intercept before the warning, then fire toward that locked point; change course to evade or shoot back. Hostile bolts are transparent and interceptable for 10% blast charge, and blasts clear nearby gunfire. Geometry leaves a traversable moving-gate corridor. Green gates, guns and obstacles also appear in Info Deck.
 
 Floor and canyon-side guns are double size at difficulties 1-2, then shrink through 1.75x, 1.5x and 1.25x to normal size at difficulty 6. Pillar and blocking-wall mounts always use normal-sized guns. Shot targets scale with the models, but the skiff collision margin does not grow. Enlarged surface mounts extend into the corridor, with their bases flush against the scenery and fire emitted from the scaled muzzle.
 
-Difficulty 2 adds fixed full-height and half-height pillars. Difficulty 3 adds columns that rise from the floor to full or half height, then retract completely with a pause below ground. Difficulty 4 adds full-height walls extending halfway across from either side and half-height walls across the floor. Density rises from four to eighteen solid obstacles, spaced between gate planes with room to dodge. Pillars and walls cannot be destroyed and block gunfire. Impacts use the canyon shield rule and deflect the skiff sideways or above the obstacle without stopping forward travel or repeatedly damaging it. All six shapes appear in Ships & Objects.
+Difficulty 2 adds fixed full-height and half-height pillars. Difficulty 3 adds columns that rise from the floor to full or half height, then retract completely with a pause below ground. Difficulty 4 adds full-height walls extending halfway across from either side and half-height walls across the floor. Density rises from four to eighteen solid obstacles, spaced between gate planes with room to dodge. Pillars and walls cannot be destroyed and block gunfire. Impacts use the canyon shield rule and deflect the skiff sideways or above the obstacle without stopping forward travel or repeatedly damaging it. All six shapes appear in Info Deck.
 
 Destroying a canyon gun pays 200 points; shooting down one of its bolts pays 10 points. Shooting an amber crate gives no immediate score or cargo. It has a 1 in 5 chance to release the normal yellow haul pickup. Collecting it increases the visible carried haul, not the score; only reaching EXIT converts each pickup into 75 points. Uncollected drops, collisions and blast-destroyed crates give no haul. Gun kills from a blast still pay 200, but cleared gunfire pays no interception points.
 
@@ -156,7 +177,7 @@ Course controllers emit typed sound events, separately from messages and score t
 
 Progress uses `vector-shooter-save-v2` in browser local storage, with separate checkpoints, top-ten scores and normal/continued records for each mode. Settings and unlocked starting-weapon choices are saved alongside progress. Fresh runs start with mode-specific equipment and no carried-over money or upgrades.
 
-Top-ten entries identify a run across retries and resumes, with a separate entry for a continued score. Resuming restores the available checkpoint without duplicating rewards.
+Top-ten entries identify a run across retries and resumes, with a separate entry for a continued score. At game over or Journey completion, a qualifying score offers three-letter initials: type A-Z and press Enter or select Save. Initials appear beside the score and survive reloads. Unnamed entries display `---`. Resuming restores the available checkpoint without duplicating rewards.
 
 ## Verification
 

@@ -8,6 +8,7 @@ import type { HudFrame } from './hud-model';
 import { WEAPON_HELP } from '../weapons';
 import { COURSE_RADAR_VIEW, SPACE_RADAR_VIEW } from '../radar';
 import { parseSmugglerFlight, smugglerAwards } from '../smuggler-rewards';
+import { createTunnelState } from '../tunnels/rules';
 
 function frame(mode: GameMode = 'journey'): HudFrame & { run: NonNullable<HudFrame['run']> } {
   const run = newRun(mode, 1); run.phase = 'playing';
@@ -20,6 +21,41 @@ function bonus(kind: 'asteroids' | 'canyon' | 'sequence'): NonNullable<HudFrame[
   return { state: { kind, difficulty: 4, points: 10, health: 2, shield: kind === 'canyon' ? 100 : 0, damage: 0, haul: 0, family: 'spread', charge: 100, remaining: 23.4, targetCount: 22, nextMarker: 4, shotsFired: 7 } };
 }
 describe('resource display is a projection, not independently updated state', () => {
+  it('hides the whole hull stat only in Invaders and restores it when modes change', () => {
+    const f = frame('invaders');
+    for (const menu of ['', 'pause', 'gameover', 'title']) {
+      f.menu = menu;
+      expect(buildHud(f).hidden['.bottom-strip > div:first-child']).toBe(true);
+    }
+    f.menu = ''; f.run.pilot.shield = 0;
+    expect(buildHud(f).text.shieldReadout).toBe('0 / 100');
+    expect(buildHud(f).classes).toContainEqual({ selector: '.game-shell', name: 'invaders-hud', active: true });
+    for (const mode of ['journey', 'endless', 'smuggler', 'tunnels'] as const) {
+      f.run.mode = mode;
+      expect(buildHud(f).hidden['.bottom-strip > div:first-child']).toBe(false);
+      expect(buildHud(f).classes).toContainEqual({ selector: '.game-shell', name: 'invaders-hud', active: false });
+    }
+  });
+  it('groups live Invaders shield and lives by score without duplicate bottom readouts', () => {
+    const f = frame('invaders'); f.run.lives = 2; f.run.pilot.shield = 37; f.run.skiff.shield = 100;
+    const model = buildHud(f);
+    expect(model.text).toMatchObject({ topLives: '2', topShield: '37' });
+    expect(model.hidden).toMatchObject({ '#survivalStats': false, '#topDamageStat': true, '#livesReadout': true, '.bottom-strip > div:nth-child(2)': true });
+    f.run.pilot.shield = 0; expect(buildHud(f).text.topShield).toBe('0');
+    f.run.pilot.shield = 100; expect(buildHud(f).text.topShield).toBe('100');
+    f.run.mode = 'journey';
+    expect(buildHud(f).hidden).toMatchObject({ '#survivalStats': true, '#livesReadout': false, '.bottom-strip > div:nth-child(2)': false });
+  });
+  it('hides the damage stat in tunnels, including menus, and restores it for Smuggler Run', () => {
+    const f = frame('tunnels'); f.run.tunnel = createTunnelState(f.run);
+    expect(buildHud(f).hidden['#topDamageStat']).toBe(true);
+    expect(buildHud(f).text).toMatchObject({ topLives: '3', topShield: '100' });
+    f.menu = 'pause'; expect(buildHud(f).hidden['#topDamageStat']).toBe(true);
+    f.menu = 'title'; expect(buildHud(f).hidden['#topDamageStat']).toBe(true);
+    const smuggler = frame('smuggler'); smuggler.run.skiff.damage = 60;
+    expect(buildHud(smuggler).hidden['#topDamageStat']).toBe(false);
+    expect(buildHud(smuggler).text.topDamage).toBe('60');
+  });
   it('groups survival stats at the top and shows charge without a lockout', () => {
     const f = frame('smuggler'); f.bonus = bonus('asteroids');
     f.bonus.state.damage = 80; f.bonus.state.charge = 45;
@@ -106,6 +142,22 @@ describe('resource display is a projection, not independently updated state', ()
     expect(model.text.creditReadout).toBe('NEXT LIFE 40,000'); expect(model.text.speedReadout).toBe('0.8s'); expect(model.hidden['.reticle']).toBe(true);
     f.shotDelay = 0; expect(buildHud(f).text.speedReadout).toBe('READY');
   });
+  it('shows the spent Invaders blast and its ongoing charge without claiming it is ready', () => {
+    const f = frame('invaders'); f.run.blastUsed = true;
+    for (const charge of [0, 45, 100]) {
+      f.run.charge = charge;
+      expect(buildHud(f).text.chargeReadout).toBe(`BLAST USED / ${charge}%`);
+    }
+    f.run.blastUsed = false; expect(buildHud(f).text.chargeReadout).toContain('BLAST READY');
+    f.run.mode = 'journey'; f.run.blastUsed = true;
+    expect(buildHud(f).text.chargeReadout).toContain('BLAST READY');
+  });
+  it.each(['invaders', 'endless'] as const)('%s names the upcoming wave payment Time Bonus without changing the amount', mode => {
+    const f = frame(mode); f.run.timeRemaining = 12.3;
+    expect(buildHud(f).text.timeBonusReadout).toBe('TIME BONUS +CR 120');
+    f.run.timeRemaining = 0; expect(buildHud(f).text.timeBonusReadout).toBe('TIME BONUS +CR 0');
+    f.run.timeBonus = 120; expect(buildHud(f).text.timeBonusReadout).toBe('PAID CR 120');
+  });
   it('shows held protection, life count and normal state after expiry', () => {
     const f = frame(); f.run.lives = 2; f.protection = 2.2;
     expect(buildHud(f).text.hitCallout).toBe('2 LIVES LEFT / RESPAWN SHIELD 3s'); expect(buildHud(f).hidden['#protectionLayer']).toBe(false);
@@ -122,16 +174,30 @@ describe('mission and course readouts', () => {
     expect(buildHud(f).radar).toEqual(contacts);
   });
   it('chooses the nearest live hostile for the objective indicator and ignores hidden contacts', () => {
-    const f = frame('invaders'), near = actorFixture({ id: 1 }), far = actorFixture({ id: 2 }), hidden = actorFixture({ id: 3 });
+    const f = frame(), near = actorFixture({ id: 1 }), far = actorFixture({ id: 2 }), hidden = actorFixture({ id: 3 });
     near.object.position.set(50, 0, -100); far.object.position.set(-300, 0, -400); hidden.object.visible = false;
     f.actors = [far, near, hidden]; hidden.dead = true;
-    expect(buildHud(f).text.objectiveArrow).toBe('> ALIEN  112');
+    expect(buildHud(f).text.objectiveArrow).toBe('> PIRATE  112');
     expect(buildHud(f).radar).toHaveLength(2);
     f.messages = [{ text: 'REINFORCEMENTS' }]; f.arrivalTime = 1;
     expect(buildHud(f).text.messageLog).toBe('REINFORCEMENTS'); expect(buildHud(f).text.missionTitle).toBe('REINFORCEMENTS ARRIVED');
     f.definition.kind = 'boss'; near.role = 'carrier'; near.essential = true;
     f.actors = [...f.actors, actorFixture({ kind: 'part', parent: 1 })];
     expect(buildHud(f).text.missionProgress).toContain('1 OUTER SYSTEMS');
+  });
+  it.each(['journey', 'endless', 'invaders'] as const)('%s hides direction indicators only for Invaders without hiding radar contacts', mode => {
+    const f = frame(mode), pirate = actorFixture(); pirate.object.position.set(-50, 0, -100);
+    f.actors = [pirate]; f.threat = pirate;
+    for (const cleared of [false, true]) {
+      f.run.cleared = cleared;
+      const view = buildHud(f);
+      expect(view.hidden['#objectiveArrow']).toBe(mode === 'invaders');
+      expect(view.hidden['#threatArrow']).toBe(mode === 'invaders');
+      expect(view.radar).toHaveLength(1);
+      if (mode === 'invaders') {
+        expect(view.text.objectiveArrow).toBeUndefined(); expect(view.text.threatArrow).toBeUndefined();
+      }
+    }
   });
   it('selects recovery or gate instructions directly from completion state', () => {
     const f = frame(); f.run.cleared = true; f.run.phase = 'cleared'; f.gate = actorFixture({ kind: 'gate', faction: 'neutral' }); f.gate.object.position.set(0, 60, -200);

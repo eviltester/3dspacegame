@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { FlightInput, MOUSE_PAUSE_HOLD_MS, throttleReadout, weaponKey, wheelThrottle } from './input';
 import { selectWeapon } from './weapons';
-import { CONTROL_LAYOUTS, KEYBOARD_LOOK_RATE } from './input-layouts';
+import { CONTROL_LAYOUTS, CONTROL_SCHEMES, KEYBOARD_LOOK_RATE } from './input-layouts';
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 it('latches a quick mouse click, maintains throttle, and clears held input on pause', async () => {
   const canvas = new EventTarget() as HTMLCanvasElement;
@@ -49,7 +49,8 @@ it('labels forward, stopped, and reverse thrust clearly', () => {
   expect(throttleReadout(-0.1)).toBe('STOP');
 });
 
-it.each(['KeyS', 'ArrowDown'])('allows %s to reverse, maintains reverse on release, and boosts backwards', async code => {
+it('allows F to reverse, maintains reverse on release, and boosts backwards', async () => {
+  const code = 'KeyF';
   const canvas = new EventTarget() as HTMLCanvasElement;
   const windowTarget = new EventTarget();
   const documentTarget = Object.assign(new EventTarget(), { pointerLockElement: null as HTMLCanvasElement | null, hidden: false, exitPointerLock: () => {} });
@@ -69,11 +70,11 @@ it.each(['KeyS', 'ArrowDown'])('allows %s to reverse, maintains reverse on relea
   input.release();
   await input.engage();
   expect(input.consume(1).speed).toBe(-90);
-  key('keydown', 'KeyW');
+  key('keydown', 'KeyR');
   expect(input.consume(1).speed).toBe(-10);
   expect(input.consume(1).speed).toBe(70);
   expect(input.consume(10).speed).toBe(180);
-  key('keyup', 'KeyW'); key('keydown', 'ShiftRight');
+  key('keyup', 'KeyR'); key('keydown', 'ShiftRight');
   expect(input.consume(0.1).speed).toBeCloseTo(184.5);
 });
 
@@ -105,6 +106,44 @@ function weaponInputFixture() {
   };
   return { input, mouse, key, pause, special, weapon, windowTarget, documentTarget, canvas };
 }
+
+it.each(CONTROL_SCHEMES)('%s accepts both fire/blast key pairs, including taps, holds and pause clearing', async scheme => {
+  const { input, key, special, windowTarget } = weaponInputFixture(); input.setScheme(scheme);
+  const up = (code: string) => windowTarget.dispatchEvent(Object.assign(new Event('keyup'), { code }));
+  key('KeyJ'); key('KeyK'); expect(input.consumeFire()).toBe(false); expect(special).not.toHaveBeenCalled();
+  await input.engage();
+  for (const code of ['Space', 'KeyJ', 'KeyZ']) {
+    expect(key(code).defaultPrevented).toBe(true);
+    expect(input.consumeFire()).toBe(true); expect(input.consumeFire()).toBe(true);
+    up(code); expect(input.consumeFire()).toBe(false);
+    key(code); up(code); expect(input.consumeFire()).toBe(true); expect(input.consumeFire()).toBe(false);
+  }
+  for (const code of ['KeyK', 'KeyX']) {
+    special.mockClear();
+    expect(key(code).defaultPrevented).toBe(true); key(code, { repeat: true });
+    expect(special).toHaveBeenCalledOnce();
+    up(code); key(code); expect(special).toHaveBeenCalledTimes(2); up(code);
+  }
+  special.mockClear();
+  for (const modifier of ['ctrlKey', 'altKey', 'metaKey', 'isComposing']) {
+    for (const code of ['KeyJ', 'KeyZ', 'KeyK', 'KeyX']) expect(key(code, { [modifier]: true }).defaultPrevented).toBe(false);
+  }
+  expect(input.consumeFire()).toBe(false); expect(special).not.toHaveBeenCalled();
+  key('KeyJ'); key('KeyZ'); input.release();
+  expect(input.consumeFire()).toBe(false); key('KeyK'); key('KeyX'); expect(special).not.toHaveBeenCalled();
+  await input.engage(); expect(input.consumeFire()).toBe(false);
+});
+
+it.each(['mouse','wasd','arrows','touch'] as const)('tunnel keyboard controls work alongside %s without changing that layout', async scheme => {
+  const { input, key, special, windowTarget } = weaponInputFixture(); input.setScheme(scheme); input.tunnelControls = true;
+  await input.engage(); key('KeyD');
+  windowTarget.dispatchEvent(Object.assign(new Event('keyup'), { code: 'KeyD' }));
+  expect(input.consume(0.01).x).toBe(0); expect(input.consumeLaneStep(0.01)).toBe(1);
+  key('ArrowLeft'); expect(input.consumeLaneStep(0.01)).toBe(-1);
+  key('KeyZ'); expect(input.consumeFire()).toBe(true);
+  key('KeyX'); expect(special).toHaveBeenCalledOnce();
+  input.release(); expect(input.consumeLaneStep(1)).toBe(0); expect(input.consumeFire()).toBe(false);
+});
 
 it('accumulates relative motion rather than absolute cursor positions and consumes it once', async () => {
   const { input, windowTarget } = weaponInputFixture(); await input.engage();
@@ -194,7 +233,7 @@ it('locks canyon throttle, permits Shift and wheel-forward boost, and clears boo
   const { input, key, canvas, windowTarget } = weaponInputFixture();
   input.throttle = -45; input.autoFlight = true; await input.engage();
   const wheel = (deltaY: number) => canvas.dispatchEvent(Object.assign(new Event('wheel'), { deltaY }));
-  for (const code of ['KeyW', 'KeyS', 'ArrowUp', 'ArrowDown']) { key(code); input.consume(1); }
+  for (const code of ['KeyR', 'KeyF']) { key(code); input.consume(1); }
   wheel(100); expect(input.consume(0.1).boost).toBe(false); expect(input.throttle).toBe(-45);
   wheel(-100); expect(input.consume(0.1).boost).toBe(true); expect(input.throttle).toBe(-45);
   input.consume(2); expect(input.consume(0.1).boost).toBe(false);
@@ -206,12 +245,12 @@ it('locks canyon throttle, permits Shift and wheel-forward boost, and clears boo
   input.autoFlight = false; wheel(-100); expect(input.throttle).toBe(-30);
 });
 
-it.each(['wasd', 'arrows'] as const)('%s supports independent steering, weapons, roll, reverse and boost without pointer lock', async scheme => {
+it.each(['mouse', 'wasd', 'arrows'] as const)('%s supports combined desktop steering, weapons, roll, reverse and boost', async scheme => {
   const { input, key, canvas, special, windowTarget } = weaponInputFixture();
   const lock = vi.spyOn(canvas, 'requestPointerLock');
   const layout = CONTROL_LAYOUTS[scheme];
   const up = (code: string) => windowTarget.dispatchEvent(Object.assign(new Event('keyup'), { code }));
-  input.setScheme(scheme); await input.engage(); expect(lock).not.toHaveBeenCalled();
+  input.setScheme(scheme); await input.engage(); expect(lock).toHaveBeenCalledOnce();
   key(layout.up[0]); key(layout.right[0]); key(layout.primary[0]);
   expect(input.consume(0.5)).toEqual({ x: KEYBOARD_LOOK_RATE / 2, y: -KEYBOARD_LOOK_RATE / 2, roll: 0, speed: 65, boost: false });
   expect(input.consumeFire()).toBe(true); expect(input.consumeFire()).toBe(true);
@@ -228,14 +267,20 @@ it.each(['wasd', 'arrows'] as const)('%s supports independent steering, weapons,
   expect(input.consume(1)).toMatchObject({ y: KEYBOARD_LOOK_RATE, boost: true }); expect(input.throttle).toBe(45);
 });
 
-it.each(['wasd', 'arrows'] as const)('%s steering is time-based, clears on pause, and never responds to stray mouse movement', async scheme => {
+it.each(['mouse', 'wasd', 'arrows'] as const)('%s combines both keyboard sets with mouse motion, and clears everything on pause', async scheme => {
   const { input, key, pause, windowTarget } = weaponInputFixture();
   const layout = CONTROL_LAYOUTS[scheme]; input.setScheme(scheme); await input.engage();
   key(layout.left[0]);
   expect(input.consume(0.25).x + input.consume(0.75).x).toBe(-KEYBOARD_LOOK_RATE);
   key(layout.right[0]); expect(input.consume(1).x).toBe(0);
+  input.clear(); key('KeyD'); key('ArrowRight'); key('KeyW'); key('ArrowUp');
+  input.mouseSensitivity = 2;
+  windowTarget.dispatchEvent(Object.assign(new Event('mousemove'), { movementX: 10, movementY: -5 }));
+  expect(input.consume(1)).toMatchObject({ x: KEYBOARD_LOOK_RATE + 20, y: -KEYBOARD_LOOK_RATE - 10, roll: 0, speed: 65 });
+  // Holding equivalent keys does not double the keyboard steering rate.
+  expect(input.consume(1)).toMatchObject({ x: KEYBOARD_LOOK_RATE, y: -KEYBOARD_LOOK_RATE, roll: 0, speed: 65 });
+  key('ArrowLeft'); key('KeyS'); expect(input.consume(1)).toMatchObject({ x: 0, y: 0, roll: 0, speed: 65 });
   key(layout.primary[0]); input.release(); await input.engage();
-  windowTarget.dispatchEvent(Object.assign(new Event('mousemove'), { movementX: 500, movementY: 500 }));
   document.dispatchEvent(new Event('pointerlockchange'));
   expect(pause).not.toHaveBeenCalled(); expect(input.consumeFire()).toBe(false);
   expect(input.consume(1)).toMatchObject({ x: 0, y: 0, roll: 0 });
@@ -243,4 +288,12 @@ it.each(['wasd', 'arrows'] as const)('%s steering is time-based, clears on pause
   key('Escape'); expect(pause).toHaveBeenCalledOnce();
   windowTarget.dispatchEvent(new Event('blur')); expect(pause).toHaveBeenCalledTimes(2);
   input.setScheme('mouse'); expect(input.consume(1)).toMatchObject({ x: 0, y: 0, roll: 0 });
+});
+
+it('keeps combined desktop steering available when pointer lock is refused', async () => {
+  const { input, key, canvas, windowTarget } = weaponInputFixture();
+  vi.spyOn(canvas, 'requestPointerLock').mockRejectedValue(new Error('Lock unavailable'));
+  await input.engage(); key('ArrowRight'); key('KeyW');
+  windowTarget.dispatchEvent(Object.assign(new Event('mousemove'), { movementX: 10, movementY: 5 }));
+  expect(input.consume(1)).toMatchObject({ x: KEYBOARD_LOOK_RATE + 10, y: -KEYBOARD_LOOK_RATE + 5, speed: 65, roll: 0 });
 });

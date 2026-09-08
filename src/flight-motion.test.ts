@@ -52,10 +52,10 @@ it.each([-10000, 10000])('clamps armada movement %s to the defensive lane', x =>
   expect(orientation.equals(new Quaternion())).toBe(true);
 });
 
-it('combines lateral input and keyboard roll but ignores vertical input in the lane', () => {
+it('uses lateral steering but ignores roll and vertical input in the lane', () => {
   const position = new Vector3(), orientation = new Quaternion();
   moveShip(position, orientation, { ...idle, x: 100, y: 300, roll: 1 }, 0.2, { ...free, kind: 'armada' });
-  expect(position.toArray()).toEqual([7, 0, 0]);
+  expect(position.toArray()).toEqual([22, 0, 0]);
 });
 
 it.each(['journey', 'endless', 'invaders'] as const)('%s applies the correct movement after clearing an armada', mode => {

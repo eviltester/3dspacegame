@@ -16,7 +16,8 @@ describe('menu views', () => {
     profile.records.endless = 700;
     expect(MenuViews.title(profile, 'journey', 'pulse', false)[3]).not.toContain('RESUME');
     const endless = MenuViews.title(profile, 'endless', 'pulse', false)[3];
-    expect(endless).toContain('RESUME WAVE 1000'); expect(endless).toContain('ATTACK CHALLENGE BEST 700');
+    expect(endless).toContain('RESUME WAVE 1000'); expect(endless).toContain('BEST 700');
+    expect(MenuViews.title(profile, 'endless', 'pulse', false)[4]?.mode).toContain('ATTACK CHALLENGE');
   });
   it.each(['journey', 'endless'] as const)('explains locked and released armadas in %s', mode => {
     const run = newRun(mode, 1); run.stage = 3; const definition = stageDefinition(mode, 3);
@@ -25,11 +26,13 @@ describe('menu views', () => {
     settleStage(run);
     expect(MenuViews.briefing(run, definition)[3]).toContain('beam is released');
   });
-  it('shows Invaders miss bands, repair odds and damage without changing other briefings', () => {
+  it('shows Invaders miss bands, repair benefits and damage without numeric drop odds', () => {
     const run = newRun('invaders', 1), view = MenuViews.briefing(run, stageDefinition('invaders', 1))[3];
     expect(view).toContain('11+ aliens -100 / 6-10 aliens -75 / 0-5 aliens -50');
     expect(view).toContain('counted when fired'); expect(view).toContain('three separately scored bolts');
-    expect(view).toContain('1-in-15 chance'); expect(view).toContain('10 shield or 20 unshielded hull');
+    expect(view).toContain('might release pickups that restore some shield');
+    expect(view).not.toContain('1-in-15'); expect(view).not.toMatch(/hull/i);
+    expect(view).toContain('Once your shield is empty, the next hit costs a life');
     expect(MenuViews.briefing(newRun('journey', 1), stageDefinition('journey', 1))[3]).not.toContain('MISS COST');
   });
   it('shows the final score and active choices without a countdown', () => {
@@ -47,8 +50,8 @@ describe('menu views', () => {
   it.each(['wasd', 'arrows'] as const)('uses %s instructions in the tractor-beam briefing', scheme => {
     const run = newRun('journey', 1); run.stage = 3;
     const view = MenuViews.briefing(run, stageDefinition('journey', 3), scheme)[3];
-    expect(view).not.toMatch(/mouse|click/i);
-    expect(view).toContain(scheme === 'wasd' ? 'Hold J to fire. K uses' : 'Hold Z to fire. X uses');
+    expect(view).toContain('Mouse, A / D or Left / Right arrows');
+    expect(view).toContain('LEFT CLICK / SPACE / J / Z'); expect(view).toContain('RIGHT CLICK / K / X');
   });
   it.each(['mouse', 'touch'] as const)('uses %s controls in course briefings', scheme => {
     const run = newRun('smuggler', 1); run.stage = 2;

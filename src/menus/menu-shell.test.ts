@@ -7,8 +7,9 @@ import { FrontMenus } from './front';
 import { MenuViews } from './views';
 import { freshProfile, newRun } from '../arcade';
 import { GAME_MODES, MODE_INFO } from '../modes';
-import { CONTROL_LAYOUTS, CONTROL_SCHEMES } from '../input-layouts';
+import { CONTROL_LAYOUTS } from '../input-layouts';
 import { WEAPON_HELP } from '../weapons';
+import { stageDefinition } from '../encounters';
 
 let shell: MenuShell;
 let user: ReturnType<typeof userEvent.setup>;
@@ -32,18 +33,99 @@ it.each(GAME_MODES)('exposes and activates %s by accessible name, without mutati
   await user.click(within(choice).getByText(MODE_INFO[mode].name));
   expect(action).toHaveBeenCalledExactlyOnceWith(`mode:${mode}`);
   expect(profile).toEqual(before);
-  expect(screen.queryByRole('region', { name: 'Ships and objects' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Info Deck' })).toBeNull();
   expect(screen.getByRole('region', { name: 'Selected mode preview' })).toBeTruthy();
+  expect(screen.getByText('GAME MODES')).toBeTruthy();
+  const record = document.querySelector('.title-play .record-line')!;
+  expect(record.textContent).toContain(`BEST ${profile.records[mode]}`);
+  expect(record.nextElementSibling?.classList.contains('title-play-buttons')).toBe(true);
+  expect(record.nextElementSibling?.querySelector('#launchButton')).toBeTruthy();
+  expect(choice.textContent).toBe(MODE_INFO[mode].name);
+  const preview = screen.getByRole('region', { name: 'Selected mode preview' });
+  expect(within(preview).getByText(MODE_INFO[mode].summary)).toBeTruthy();
+  expect(within(preview).getByText(MODE_INFO[mode].detail)).toBeTruthy();
+  expect(document.querySelector('#screenContent')!.textContent).not.toContain(MODE_INFO[mode].detail);
+  for (const other of GAME_MODES.filter(other => other !== mode)) expect(screen.queryByText(MODE_INFO[other].detail)).toBeNull();
 });
 
 it('focuses Play, supports keyboard activation, and traps Tab away from hidden flight controls', async () => {
   shell.show(...FrontMenus.title(freshProfile(), 'journey', 'pulse', false));
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'PLAY GAME' }));
   await user.keyboard('{Enter}'); expect(action).toHaveBeenCalledExactlyOnceWith('newRun');
-  const last = screen.getByRole('button', { name: 'SHIPS & OBJECTS' });
+  const last = screen.getByRole('button', { name: 'PLAY GAME' });
   last.focus(); await user.tab();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: /^ARCADE JOURNEY/ }));
   await user.tab({ shift: true }); expect(document.activeElement).toBe(last);
+});
+
+it.each(['title', 'pause'])('%s uses Up/Down to select enabled visible actions and wraps at the ends', async mode => {
+  shell.show(mode, 'MENU', '', `${button('first', 'FIRST')}<div hidden>${button('hidden', 'HIDDEN')}</div>
+    ${button('disabled', 'DISABLED', 'disabled')}${button('second', 'SECOND')}${button('last', 'LAST')}`);
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'FIRST' }));
+  await user.keyboard('{ArrowDown}'); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'SECOND' }));
+  await user.keyboard('{ArrowUp}{ArrowUp}'); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'LAST' }));
+  await user.keyboard('{ArrowDown}'); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'FIRST' }));
+  expect(action).not.toHaveBeenCalled();
+});
+
+it.each(['{Enter}', ' ', 'j', 'z'])('%s confirms the focused menu action exactly once', async key => {
+  shell.show('pause', 'PAUSED', '', button('unpause', 'RESUME') + button('title', 'TITLE SCREEN'));
+  await user.keyboard('{ArrowDown}'); await user.keyboard(key);
+  expect(action).toHaveBeenCalledExactlyOnceWith('title');
+});
+
+it('holding confirmation cannot cascade through screens, and modified keys are left alone', async () => {
+  const menu = () => shell.show('title', 'TITLE', '', button('newRun', 'PLAY'));
+  action.mockImplementation(menu); menu();
+  await user.keyboard('{Enter>4/}'); expect(action).toHaveBeenCalledTimes(1);
+  await user.keyboard('{Control>}z{ArrowDown}{/Control}'); expect(action).toHaveBeenCalledTimes(1);
+  shell.hide(); await user.keyboard('j{Enter}{ArrowDown}'); expect(action).toHaveBeenCalledTimes(1);
+});
+
+it('preserves typing and native arrow behaviour in editable fields', async () => {
+  shell.show('settings', 'SETTINGS', '', '<input aria-label="Name"><select aria-label="Choice"><option>One</option><option>Two</option></select>' + button('done', 'DONE'));
+  const name = screen.getByRole<HTMLInputElement>('textbox', { name: 'Name' });
+  await user.type(name, 'jz'); expect(name.value).toBe('jz');
+  const arrow = new KeyboardEvent('keydown', { code: 'ArrowDown', bubbles: true, cancelable: true }); name.dispatchEvent(arrow);
+  expect(arrow.defaultPrevented).toBe(false); expect(document.activeElement).toBe(name);
+  screen.getByRole('combobox').focus(); await user.keyboard('{ArrowUp}{Enter}');
+  expect(document.activeElement).toBe(screen.getByRole('combobox')); expect(action).not.toHaveBeenCalled();
+});
+
+it.each(['controls', 'objects', 'scores', 'briefing', 'gameover'] as const)('Escape uses the Title Screen exit from %s regardless of focus', async view => {
+  const profile = freshProfile();
+  const views = {
+    controls: FrontMenus.controls(profile), objects: FrontMenus.objects(), scores: FrontMenus.scores(profile, 'journey'),
+    briefing: MenuViews.briefing(newRun('journey', 1), stageDefinition('journey', 1)),
+    gameover: MenuViews.gameOver(newRun('journey', 1), profile)
+  };
+  shell.show(...views[view]);
+  shell.overlay.querySelector<HTMLButtonElement>('button')!.focus();
+  await user.keyboard('{Escape}');
+  expect(action).toHaveBeenCalledExactlyOnceWith('title');
+});
+
+it('Escape from a focused Controls slider returns to the pause menu', async () => {
+  shell.show(...FrontMenus.controls(freshProfile(), 'backToPause'));
+  shell.overlay.querySelector<HTMLInputElement>('input')!.focus();
+  await user.keyboard('{Escape}');
+  expect(action).toHaveBeenCalledExactlyOnceWith('backToPause');
+});
+
+it('does not repeat or modify Escape navigation, or activate hidden exit buttons', async () => {
+  shell.show(...FrontMenus.objects());
+  await user.keyboard('{Escape>4/}'); expect(action).toHaveBeenCalledExactlyOnceWith('title');
+  action.mockClear();
+  await user.keyboard('{Control>}{Escape}{/Control}'); expect(action).not.toHaveBeenCalled();
+  shell.show('objects', 'INFO DECK', '', `<div hidden>${button('title', 'TITLE SCREEN')}</div>`);
+  await user.keyboard('{Escape}'); expect(action).not.toHaveBeenCalled();
+  shell.show(...FrontMenus.objects()); shell.hide();
+  await user.keyboard('{Escape}'); expect(action).not.toHaveBeenCalled();
+});
+
+it.each(['title', 'pause'])('Escape does not trigger a different action on %s', async view => {
+  shell.show(view, 'MENU', '', button('title', 'TITLE SCREEN'));
+  await user.keyboard('{Escape}'); expect(action).not.toHaveBeenCalled();
 });
 
 it('prefers the selected mode checkpoint and makes Resume keyboard-accessible', async () => {
@@ -57,9 +139,10 @@ it('prefers the selected mode checkpoint and makes Resume keyboard-accessible', 
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'PLAY GAME' }));
 });
 
-it.each(CONTROL_SCHEMES)('%s settings preserve focus after the owner rebuilds the view', async scheme => {
+it.each(['mouse', 'touch'] as const)('%s device settings preserve focus after the owner rebuilds the view', async scheme => {
   const profile = freshProfile();
   shell.show(...FrontMenus.controls(profile));
+  expect(within(screen.getByRole('group', { name: 'Input device' })).getAllByRole('button')).toHaveLength(2);
   action.mockImplementation(name => {
     if (name === `controls:${scheme}`) profile.settings.controlScheme = scheme;
     shell.show(...FrontMenus.controls(profile));
@@ -111,7 +194,7 @@ it('Level Warp fields support labelled selection and typing before dispatching a
 
 it.each(['objects', 'briefing'])('%s supports object arrows with mouse and keyboard', async mode => {
   shell.show(mode, 'CONTACTS', '', button('title', 'BACK'));
-  expect(screen.getByRole('region', { name: 'Ships and objects' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Info Deck' })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Next object' }));
   await user.click(screen.getByRole('button', { name: 'Previous object' }));
   await user.keyboard('{ArrowRight}{ArrowLeft}');
@@ -136,6 +219,33 @@ it.each([0, 1000, 20000, 123456])('shows final score %s and a usable Continue ch
   expect(screen.getByText(score.toLocaleString('en-GB'))).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'CONTINUE' }));
   expect(action).toHaveBeenCalledExactlyOnceWith('relaunch');
+});
+
+it.each(GAME_MODES)('Game Over shows only the %s high scores, using the same table as High Scores', mode => {
+  const profile = freshProfile();
+  for (const [index, other] of GAME_MODES.entries()) profile.scoreboards[other] = [
+    { id: `${other}-clean`, score: 9000 + index, stage: 8, continued: false, initials: 'ACE' },
+    { id: `${other}-continued`, score: 8000 + index, stage: 10, continued: true }
+  ];
+  const before = structuredClone(profile);
+  shell.show(...MenuViews.gameOver(newRun(mode, 1), profile));
+  const table = screen.getByRole('table', { name: `${MODE_INFO[mode].name} high scores` });
+  expect(within(table).getAllByRole('row')).toHaveLength(3);
+  expect(within(table).getByRole('columnheader', { name: MODE_INFO[mode].unit })).toBeTruthy();
+  expect(within(table).getByText('ACE')).toBeTruthy(); expect(within(table).getByText('---')).toBeTruthy();
+  expect(within(table).getByText('CONTINUED')).toBeTruthy(); expect(within(table).getByText('CLEAN')).toBeTruthy();
+  for (const other of GAME_MODES) {
+    for (const entry of profile.scoreboards[other]) expect(!!within(table).queryByText(String(entry.score))).toBe(other === mode);
+  }
+  const html = table.outerHTML;
+  shell.show(...FrontMenus.scores(profile, mode));
+  expect(screen.getByRole('table').outerHTML).toBe(html); expect(profile).toEqual(before);
+});
+
+it('Game Over has an empty high-score table when no flights qualify', () => {
+  shell.show(...MenuViews.gameOver(newRun('invaders', 1), freshProfile()));
+  expect(within(screen.getByRole('table')).getByText('NO FLIGHTS RECORDED YET')).toBeTruthy();
+  expect(screen.queryByRole('textbox')).toBeNull();
 });
 
 it('excludes hidden, CSS-hidden, inert and disabled elements from focus wrapping', async () => {

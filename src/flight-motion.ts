@@ -12,7 +12,7 @@ interface FlightArea { mode: GameMode; kind: StageDefinition['kind']; cleared: b
 /** Update the ship in place; return true when it reaches the arena boundary. */
 export function moveShip(position: Vector3, orientation: Quaternion, look: FlightCommand, dt: number, area: FlightArea): boolean {
   if (area.kind === 'armada' && (!area.cleared || area.mode === 'invaders')) {
-    position.x = MathUtils.clamp(position.x + look.x * 0.22 - look.roll * dt * 75, -ARMADA_LANE_LIMIT, ARMADA_LANE_LIMIT);
+    position.x = MathUtils.clamp(position.x + look.x * 0.22, -ARMADA_LANE_LIMIT, ARMADA_LANE_LIMIT);
     position.y = 0; position.z = 0; orientation.identity();
     return false;
   }

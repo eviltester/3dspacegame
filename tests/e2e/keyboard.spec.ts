@@ -1,14 +1,14 @@
 import { test, expect } from './fixtures/game';
 
-test('keyboard flight launches without pointer lock and Escape returns focus to Resume', async ({ game, page }) => {
-  await game.open(); await game.action('controls'); await game.action('controls:wasd'); await game.action('title');
+test('desktop flight accepts keyboard input without choosing a layout and Escape returns focus to Resume', async ({ game, page }) => {
+  await game.open();
   // Detailed layouts and menu traversal are DOM/input unit tests. This verifies
   // native key delivery across the real menu-to-flight boundary only once.
   await page.keyboard.press('Enter');
-  await expect(page.locator('#missionBriefCaution')).toContainText('Hold J');
+  await expect(page.locator('#missionBriefCaution')).toContainText('SPACE / J / Z');
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await game.state()).menu).toBe('');
-  expect(await page.evaluate(() => document.pointerLockElement)).toBeNull();
+  expect(await page.evaluate(() => document.pointerLockElement === document.querySelector('#viewport canvas'))).toBe(true);
   const before = await game.state();
   await page.keyboard.down('w'); await page.keyboard.down('j'); await game.step(0.1);
   await page.keyboard.up('w'); await page.keyboard.up('j');

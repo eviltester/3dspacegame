@@ -3,9 +3,11 @@ import type { RunState } from '../arcade';
 import type { Actor } from './types';
 
 /** Spend one full charge and resolve damage before cosmetic effects are started. */
-export function defensiveBlast(run: Pick<RunState, 'phase' | 'charge'>, actors: readonly Actor[], position: Vector3,
+export function defensiveBlast(run: Pick<RunState, 'mode' | 'phase' | 'charge' | 'blastUsed'>, actors: readonly Actor[], position: Vector3,
   clearFire: () => void, damage: (actor: Actor, amount: number) => void): boolean {
-  if (run.phase !== 'playing' || run.charge < 100) return false;
+  if (run.phase !== 'playing' || run.charge < 100 || run.mode === 'invaders' && run.blastUsed) return false;
+  // Mark before callbacks: kills can recharge the blast during this same volley.
+  if (run.mode === 'invaders') run.blastUsed = true;
   run.charge = 0;
   clearFire();
   // Work on a snapshot because damage may remove actors from the live world.

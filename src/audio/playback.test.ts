@@ -49,6 +49,16 @@ it('mute applies to the shared output for every cue and firing voice', async () 
   sound.cue('extraLife'); sound.enemyShoot('canyonGun', 100); expect(gains[0].value).toBe(0);
   sound.setMuted(false); expect(gains[0].value).toBe(0.48);
 });
+it('the arrival siren is distinct, audible at capacity and does not overlap itself', async () => {
+  const { sound, context, started } = await bank();
+  for (let i = 0; i < 14; i++) { context.currentTime += 0.1; sound.shoot(); }
+  sound.cue('policeArrival'); expect(started).toHaveLength(15);
+  expect(started.at(-1)!.buffer).toEqual(synthesizeEffect('policeArrival'));
+  expect(started[0].stopped).toBe(true);
+  context.currentTime += 0.5; sound.cue('policeArrival'); expect(started).toHaveLength(15);
+  context.currentTime += 1; sound.cue('policeArrival'); expect(started).toHaveLength(16);
+  expect(synthesizeEffect('policeArrival')).not.toEqual(synthesizeEffect('policeDispatch'));
+});
 it('the extra-life reward is one ringing high ping, not a low warning or multi-note phrase', () => {
   const samples = synthesizeEffect('extraLife').slice(0, SOUND_SAMPLE_RATE / 10);
   const power = (hz: number) => {

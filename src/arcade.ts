@@ -19,6 +19,8 @@ import { freshSkiff, parseSkiff } from './skiff-vitals';
 import type { SkiffVitals } from './skiff-vitals';
 import { parseSmugglerFlight, parseSmugglerResult } from './smuggler-rewards';
 import type { SmugglerFlight, SmugglerResult } from './smuggler-rewards';
+import type { TunnelRunState } from './tunnels/types';
+import { parseTunnel } from './tunnels/persistence';
 
 export type { GameMode } from './modes';
 export type WeaponFamily = 'pulse' | 'spread' | 'lance';
@@ -35,6 +37,8 @@ export interface RunResources {
   charge: number;
 }
 export interface RunState extends RunResources {
+  /** An exact lane-encounter snapshot, including outstanding projectile results. */
+  tunnel?: TunnelRunState;
   /** Smuggler craft condition persists across courses and resumed checkpoints. */
   skiff: SkiffVitals;
   /** Evidence survives interrupted flights; paid summaries cannot pay twice. */
@@ -50,6 +54,8 @@ export interface RunState extends RunResources {
   stageHaul: number | null;
   /** Per-wave projectile results, retained on cleared checkpoints. */
   accuracy: WaveAccuracy;
+  /** Invaders wave allowance; separate from charge and retryable equipment. */
+  blastUsed: boolean;
   practice?: boolean;
   mode: GameMode;
   seed: number;
@@ -96,9 +102,9 @@ export const resources = (run: RunResources): RunResources => clone({ pilot: run
 
 export function newRun(mode: GameMode, seed: number, family: WeaponFamily = 'pulse'): RunState {
   const base: RunResources = { pilot: createInitialProgress(), family, tiers: { pulse: 1, spread: 1, lance: 1 }, magnet: 20, charge: 0 };
-  return { ...base, mode, skiff: freshSkiff(mode === 'smuggler'), id: `${mode}-${seed}`, nextLifeScore: lifeScoreInterval(mode), stageReward: 0, seed: seed >>> 0, stage: 1, lives: 3, continued: false, phase: 'briefing', checkpoint: resources(base),
+  return { ...base, mode, skiff: freshSkiff(mode === 'smuggler' || mode === 'tunnels'), id: `${mode}-${seed}`, nextLifeScore: lifeScoreInterval(mode), stageReward: 0, seed: seed >>> 0, stage: 1, lives: 3, continued: false, phase: 'briefing', checkpoint: resources(base),
     cleared: false, stageHaul: null, smugglerFlight: null, smugglerResult: null, bonusStatus: 'available', chain: { kills: 0, multiplier: 1, remaining: 0, recent: [] }, elapsed: 0,
-    timeRemaining: STAGE_TIME_LIMIT, timeBonus: null, kills: 0, earlyCore: false, accuracy: emptyAccuracy() };
+    timeRemaining: STAGE_TIME_LIMIT, timeBonus: null, kills: 0, earlyCore: false, accuracy: emptyAccuracy(), blastUsed: false };
 }
 
 export function timeBonusSeconds(run: Pick<RunState, 'timeRemaining'>): number {
@@ -158,7 +164,12 @@ export function pickup(run: RunState, drop: CargoDrop): void {
     else run.pilot.credits += 200;
     run.pilot.score += 40;
     run.pilot.weaponLevel = run.tiers[run.family];
-  } else run.pilot = applyCargoPickup(run.pilot, drop);
+  } else {
+    const hull = run.pilot.hull;
+    run.pilot = applyCargoPickup(run.pilot, drop);
+    // Keep the shared pickup values without granting Invaders a hull reserve.
+    if (run.mode === 'invaders') run.pilot.hull = hull;
+  }
 }
 /** Returns false when already paid; callers must then skip the celebration too. */
 export function settleStage(run: RunState): boolean {
@@ -170,7 +181,7 @@ export function settleStage(run: RunState): boolean {
   return true;
 }
 export function bonusFor(run: Pick<RunState, 'mode' | 'stage'>): BonusKind | null {
-  if (run.mode === 'invaders' || run.mode === 'smuggler') return null;
+  if (run.mode === 'invaders' || run.mode === 'smuggler' || run.mode === 'tunnels') return null;
   if (run.mode === 'journey') return run.stage < JOURNEY_STAGE_COUNT && run.stage % 4 === 3
     ? (['asteroids', 'canyon', 'sequence'] as const)[Math.floor(run.stage / 4) % 3] : null;
   return run.stage % 5 === 0 ? (['asteroids', 'canyon', 'sequence'] as const)[(run.stage / 5 - 1) % 3] : null;
@@ -192,7 +203,7 @@ export function settleBonus(run: RunState, ratio: number, courseScore?: number):
   return { medal, credits, score, extraLife };
 }
 export function dock(run: RunState): void {
-  if (run.mode === 'invaders') return;
+  if (run.mode === 'invaders' || run.mode === 'tunnels') return;
   run.pilot = instantTrade(run.pilot, 'lawful').progress;
   run.phase = 'shop';
 }
@@ -202,7 +213,7 @@ export function purchasePrice(run: RunState, kind: Purchase): number {
 }
 /** The shop and purchase operation share this check so displayed eligibility is real. */
 export function purchaseBlocked(run: RunState, kind: Purchase): string | null {
-  if (run.mode === 'invaders') return 'Upgrades are collected in flight';
+  if (run.mode === 'invaders' || run.mode === 'tunnels') return 'Upgrades are collected in flight';
   if (run.phase !== 'shop') return 'Dock first';
   if (kind === 'tier' && run.tiers[run.family] >= 3) return 'Maximum tier';
   if (kind === 'tier' && run.tiers[run.family] === 2 && run.stage < (run.mode === 'journey' ? 5 : 8)) return `Tier 3 opens after ${run.mode === 'journey' ? 'stage 5' : 'wave 8'}`;
@@ -222,6 +233,7 @@ export function purchase(run: RunState, kind: Purchase): boolean {
 }
 /** Restore the checkpoint without charging a life; loseLife handles that separately. */
 export function retry(run: RunState, useContinue = false): void {
+  if (run.mode === 'tunnels') { run.skiff = { ...(run.tunnel?.startVitals ?? freshSkiff(true)) }; delete run.tunnel; }
   const score = run.pilot.score;
   Object.assign(run, resources(run.checkpoint));
   run.pilot.score = score;
@@ -233,8 +245,9 @@ export function retry(run: RunState, useContinue = false): void {
     run.pilot.score = 0;
     run.checkpoint.pilot.score = 0;
     run.nextLifeScore = lifeScoreInterval(run.mode);
-    run.skiff = freshSkiff(run.mode === 'smuggler');
+    run.skiff = freshSkiff(run.mode === 'smuggler' || run.mode === 'tunnels');
     run.smugglerFlight = null;
+    run.blastUsed = false;
   }
   run.cleared = false;
   run.elapsed = 0;
@@ -269,6 +282,7 @@ export function advance(run: RunState): void {
   if (!run.cleared) return;
   if (run.mode === 'journey' && run.stage >= JOURNEY_STAGE_COUNT) { run.phase = 'victory'; return; }
   run.stage += 1;
+  run.blastUsed = false;
   run.smugglerFlight = null;
   run.smugglerResult = null;
   run.phase = 'briefing';
@@ -302,16 +316,18 @@ export function freshProfile(legacy: unknown = null): ProfileSaveV2 {
   if (Number(old.unlockedWeaponLevel) >= 2) unlocked.push('spread');
   if (Number(old.unlockedWeaponLevel) >= 3) unlocked.push('lance');
   return { version: 2, settings: { aimAssist: true, muted: false, controlScheme: 'mouse', tiltSensitivity: 1, mouseSensitivity: 1 }, unlocked, legacyScore: Math.max(0, Number(old.bestScore) || 0),
-    records: { journey: 0, endless: 0, invaders: 0, smuggler: 0, journeyContinued: 0, endlessContinued: 0, invadersContinued: 0, smugglerContinued: 0 }, scoreboards: emptyScoreboards(), checkpoints: {} };
+    records: { journey: 0, endless: 0, invaders: 0, smuggler: 0, tunnels: 0, journeyContinued: 0, endlessContinued: 0, invadersContinued: 0, smugglerContinued: 0, tunnelsContinued: 0 }, scoreboards: emptyScoreboards(), checkpoints: {} };
 }
 /**
- * Store a resumable checkpoint, not a snapshot of moving ships or projectiles.
+ * Free-flight modes store checkpoint resources; tunnels retain the exact encounter
+ * including moving ships and pending projectile outcomes.
  * An interrupted fight restarts; a paid shop/result stays paid. Clone first so
  * pausing and saving cannot reset the live game the player is about to resume.
  */
 export function saveCheckpoint(profile: ProfileSaveV2, run: RunState): void {
   if (run.practice) return;
   const saved = clone(run);
+  if (run.mode === 'tunnels') { profile.checkpoints.tunnels = saved; return; }
   if (!saved.cleared && (saved.phase === 'playing' || saved.phase === 'briefing')) retry(saved);
   if (saved.mode === 'smuggler' && (saved.phase === 'bonus' || saved.phase === 'bonusResult')) retry(saved);
   else {
@@ -344,10 +360,16 @@ export function parseProfile(raw: string | null, legacy: string | null, defaultS
     for (const mode of GAME_MODES) {
       const run = parsed.checkpoints?.[mode];
       if (validCheckpoint(run, mode)) {
-        run.skiff = parseSkiff(run.skiff, mode === 'smuggler');
+        run.skiff = parseSkiff(run.skiff, mode === 'smuggler' || mode === 'tunnels');
+        if (mode === 'tunnels') {
+          const tunnel = parseTunnel(run.tunnel, run.stage);
+          if (run.tunnel && !tunnel) { retry(run); run.skiff = freshSkiff(true); }
+          run.tunnel = tunnel;
+        }
         run.smugglerFlight = run.smugglerFlight ? parseSmugglerFlight(run.smugglerFlight) : null;
         run.smugglerResult = parseSmugglerResult(run.smugglerResult);
         run.accuracy = parseAccuracy(run.accuracy);
+        run.blastUsed ??= false;
         if (typeof run.id !== 'string') run.id = `${mode}-legacy-${run.seed}`;
         const lifeInterval = lifeScoreInterval(mode);
         if (run.nextLifeScore === undefined) run.nextLifeScore = (Math.floor(run.pilot.score / lifeInterval) + 1) * lifeInterval;
@@ -373,6 +395,7 @@ export function parseProfile(raw: string | null, legacy: string | null, defaultS
 function validCheckpoint(run: RunState | undefined, mode: GameMode): run is RunState {
   if (!run || run.mode !== mode || !Number.isInteger(run.stage) || run.stage < 1 || (mode === 'journey' && run.stage > JOURNEY_STAGE_COUNT)) return false;
   if (run.practice !== undefined && run.practice !== false) return false;
+  if (run.blastUsed !== undefined && typeof run.blastUsed !== 'boolean') return false;
   // Accept positive stored milestones before aligning them to the current rules.
   if (run.nextLifeScore !== undefined && (!Number.isSafeInteger(run.nextLifeScore) || run.nextLifeScore <= 0)) return false;
   if (run.stageReward !== undefined && !Number.isSafeInteger(run.stageReward)) return false;

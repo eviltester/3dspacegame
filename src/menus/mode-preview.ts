@@ -5,10 +5,18 @@
  */
 import * as THREE from 'three';
 import type { GameMode } from '../modes';
+import { newRun } from '../arcade';
+import { TunnelSimulation } from '../tunnels/simulation';
+import { TunnelView } from '../tunnels/view';
+import { laneDelta } from '../tunnels/shapes';
 import { BonusController, asteroidFlight, asteroidGap } from '../bonus';
 import { armadaFormationPosition, configureArmadaCamera } from '../armada';
 import { invaderPosition, invaderStage } from '../invaders';
 import { createArmadaRig, createBaseModel, createBoltModel, createEnemyModel, createInvaderModel, createPlanetModel, disposeObject } from '../models';
+
+// Thumbnail framing only. Leave the first-person courses at their normal field
+// of view; the fleet and tunnel displays need a closer view in the same space.
+const PREVIEW_ZOOM: Record<GameMode, number> = { journey: 1.8, endless: 1.7, invaders: 1.3, smuggler: 1, tunnels: 1.5 };
 
 export class ModePreview {
   readonly scene = new THREE.Scene();
@@ -21,7 +29,9 @@ export class ModePreview {
   private elapsed = 0;
   private courseTime = 0;
   private canyon = false;
+  private tunnel: TunnelView | null = null;
   constructor(readonly mode: GameMode) {
+    if (mode === 'tunnels') { this.startTunnel(1); return; }
     if (mode === 'smuggler') { this.startCourse(); return; }
     const count = mode === 'invaders' ? 14 : mode === 'endless' ? 8 : 4;
     for (let i = 0; i < count; i++) {
@@ -42,8 +52,15 @@ export class ModePreview {
   }
   resize(aspect: number): void {
     this.camera.aspect = aspect;
+    this.camera.zoom = PREVIEW_ZOOM[this.mode];
     this.camera.updateProjectionMatrix();
+    this.tunnel?.configureCamera(this.camera);
     if (this.mode === 'invaders') configureArmadaCamera(this.camera);
+  }
+  private startTunnel(level: number): void {
+    if (this.tunnel) { this.scene.remove(this.tunnel.root); this.tunnel.dispose(); }
+    const run = newRun('tunnels', 0x1984); run.stage = level; run.phase = 'playing';
+    this.tunnel = new TunnelView(new TunnelSimulation(run)); this.scene.add(this.tunnel.root); this.tunnel.configureCamera(this.camera);
   }
   private startCourse(): void {
     if (this.course) { this.scene.remove(this.course.root); this.course.dispose(); }
@@ -53,6 +70,14 @@ export class ModePreview {
   }
   tick(dt: number): void {
     this.elapsed += dt;
+    if (this.tunnel) {
+      const simulation = this.tunnel.simulation, s = simulation.state;
+      if (s.elapsed > 12 || s.phase !== 'assault') { this.startTunnel(s.level === 1 ? 7 : 1); return; }
+      const enemy = s.entities.filter(e => e.required).sort((a, b) => a.depth - b.depth)[0];
+      s.protection = 5;
+      const movement = enemy ? laneDelta(s.desiredLane, enemy.lane, simulation.shape.closed) * 45 * Math.min(1, dt * 5) : dt * 25;
+      simulation.step(Math.min(0.1, dt), movement, true); this.tunnel.update(dt, simulation.drain()); return;
+    }
     if (this.course) {
       this.courseTime += dt;
       if (this.courseTime > 9 || this.course.state.finished) { this.canyon = !this.canyon; this.startCourse(); }
@@ -88,6 +113,7 @@ export class ModePreview {
     });
   }
   dispose(): void {
+    if (this.tunnel) { this.scene.remove(this.tunnel.root); this.tunnel.dispose(); }
     if (this.course) { this.scene.remove(this.course.root); this.course.dispose(); }
     disposeObject(this.scene); this.scene.clear();
   }

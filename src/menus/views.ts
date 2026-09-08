@@ -18,8 +18,11 @@ import { WEAPON_HELP, weaponSpec } from '../weapons';
 import { invaderMissCost } from '../combat/accuracy';
 import { CONTROL_LAYOUTS } from '../input-layouts';
 import type { ControlScheme } from '../input-layouts';
+import { tunnelBriefing } from '../tunnels/menus';
+import { highScoreEntry, highScoreTable } from './high-score';
 
-export type MenuView = [screen: string, title: string, status: string, content: string];
+export interface MenuPreview { mode: string; weapon: string }
+export type MenuView = [screen: string, title: string, status: string, content: string, preview?: MenuPreview];
 const warpBackButton = (run: RunState | null): string => run?.practice ? button('levelWarp', 'CHOOSE LEVEL') : '';
 
 export class MenuViews {
@@ -36,10 +39,12 @@ export class MenuViews {
       <div class="warp-picker"><label for="warpWave">ATTACK CHALLENGE WAVE</label><input id="warpWave" type="number" min="1" max="${Number.MAX_SAFE_INTEGER - 1}" step="1" value="${run?.mode === 'endless' ? run.stage : 1}" required>${button('warpEndless', 'WARP TO WAVE')}</div>
       <div class="warp-picker"><label for="warpInvaders">INVADERS WAVE</label><input id="warpInvaders" type="number" min="1" max="1000000" step="1" value="1" required>${button('warpInvaders', 'WARP TO INVADERS')}</div>
       <div class="warp-picker"><label for="warpSmuggler">SMUGGLER RUN LEG</label><input id="warpSmuggler" type="number" min="1" max="1000000" step="1" value="1" required>${button('warpSmuggler', 'WARP TO SMUGGLER')}</div>
+      <div class="warp-picker"><label for="warpTunnels">TEMPESTUOUS TUNNELS</label><input id="warpTunnels" type="number" min="1" max="1000000" step="1" value="1" required>${button('warpTunnels', 'WARP TO TUNNEL')}</div>
       <div class="warp-picker"><h2>BONUS SORTIES</h2><label for="warpDifficulty">DIFFICULTY</label><select id="warpDifficulty">${Array.from({ length: BONUS_DIFFICULTY_LEVELS }, (_, i) => `<option value="${i + 1}">${i + 1}${i === 0 ? ' / FIRST RUN' : i === BONUS_DIFFICULTY_LEVELS - 1 ? ' / MAXIMUM' : ''}</option>`).join('')}</select>${(Object.keys(WARP_BONUSES) as BonusKind[]).map(kind => button(`warpBonus:${kind}`, BONUS_NAMES[kind])).join('')}</div>
       <div class="menu-actions">${button('title', 'TITLE SCREEN')}</div>`];
   }
   static briefing(run: RunState, definition: StageDefinition, scheme: ControlScheme = 'mouse'): MenuView {
+    if (run.mode === 'tunnels') return tunnelBriefing(run, scheme);
     if (run.mode === 'smuggler') return SmugglerMenus.briefing(run, scheme);
     const armada = definition.kind === 'armada' && (!run.cleared || run.mode === 'invaders');
     const layout = CONTROL_LAYOUTS[scheme];
@@ -50,7 +55,8 @@ export class MenuViews {
     return ['briefing', definition.title.replace(/\d+/g, '').trim(), `${MODE_INFO[run.mode].name} / ${MODE_INFO[run.mode].unit} ${run.stage}${run.mode === 'journey' ? ` / ${JOURNEY_STAGE_COUNT}` : ''}`, `
       <section class="mission-briefing"><p class="briefing-status">MISSION BRIEFING</p><h2 id="missionBriefTitle">${definition.title}</h2><p id="missionBriefObjective">${objective}</p><p id="missionBriefCaution">${caution}</p><p id="missionBriefReward">REWARD CR ${200 + Math.min(20, run.stage) * 35 + (run.stage === 1 ? 150 : 0)}</p></section>
       <p class="menu-description">TIME BONUS: ${formatStageTime(run)} remaining. ${TIME_BONUS_RATE} CR per whole second left ${run.mode === 'invaders' || (run.mode === 'endless' && run.stage % 5 !== 0) ? 'when the next wave starts' : 'at the Warp Gate'}. Zero ends the bonus, not the mission.</p>
-      ${run.mode === 'invaders' ? `<p class="menu-description">MISS COST: 11+ aliens -${invaderMissCost(11)} / 6-10 aliens -${invaderMissCost(6)} / 0-5 aliens -${invaderMissCost(5)} points per bolt, counted when fired. Spread fires three separately scored bolts; alien hits and interceptions count toward wave accuracy. Aliens take firing turns and recover faster as waves advance.</p><p class="menu-description">Extra life every ${INVADER_EXTRA_LIFE_SCORE.toLocaleString('en-GB')} points, up to five lives. Repair drops have a 1-in-15 chance and restore +30 hull and +30 shield. Alien hits cost 10 shield or 20 unshielded hull. Weapon cores upgrade your equipped weapon. Respawn shields last three seconds.</p><p class="run-loadout">COOLDOWNS: ${FAMILIES.map(f => `${f.toUpperCase()} ${weaponSpec(f, run.tiers[f], run.mode).cooldown.toFixed(2)}s`).join(' / ')}</p>` : ''}
+      ${run.mode === 'invaders' ? '<p class="menu-description">One blast per wave. Charge keeps building after use, ready for the next wave.</p>' : ''}
+      ${run.mode === 'invaders' ? `<p class="menu-description">MISS COST: 11+ aliens -${invaderMissCost(11)} / 6-10 aliens -${invaderMissCost(6)} / 0-5 aliens -${invaderMissCost(5)} points per bolt, counted when fired. Spread fires three separately scored bolts; alien hits and interceptions count toward wave accuracy. Aliens take firing turns and recover faster as waves advance.</p><p class="menu-description">Extra life every ${INVADER_EXTRA_LIFE_SCORE.toLocaleString('en-GB')} points, up to five lives. Destroyed aliens might release pickups that restore some shield. Once your shield is empty, the next hit costs a life. Weapon cores upgrade your equipped weapon. Respawn shields last three seconds.</p><p class="run-loadout">COOLDOWNS: ${FAMILIES.map(f => `${f.toUpperCase()} ${weaponSpec(f, run.tiers[f], run.mode).cooldown.toFixed(2)}s`).join(' / ')}</p>` : ''}
       <p class="run-loadout">${run.lives} LIVES / ${run.family.toUpperCase()} ${run.tiers[run.family]} / ${definition.waves.length} ${run.mode === 'invaders' ? 'ALIEN' : 'PIRATE'} FLIGHTS</p>
       <div class="menu-actions">${button('launch', 'START MISSION', 'id="launchButton"')}${warpBackButton(run)}${button('title', 'TITLE SCREEN')}</div>`];
   }
@@ -70,12 +76,16 @@ export class MenuViews {
     const difficulty = bonusDifficulty(run.mode, run.stage);
     return ['bonusOffer', BONUS_NAMES[kind], `OPTIONAL BONUS / DIFFICULTY ${difficulty}`, `<p class="mission-copy">${bonusBrief(kind, difficulty, scheme)}</p><p class="safe-bonus">Your main ship, cargo, equipment and lives stay safe. Finish, fail or skip: the journey continues.</p><div class="menu-actions">${button('bonusPlay', 'PLAY BONUS', 'id="launchButton"')}${button('bonusSkip', 'SKIP TO DOCK')}${warpBackButton(run)}</div>`];
   }
-  static gameOver(run: RunState): MenuView {
+  static gameOver(run: RunState, profile?: ProfileSaveV2): MenuView {
     return ['gameover', 'GAME OVER', 'CONTINUE FROM CHECKPOINT / SCORE RESETS', `
+      <div class="gameover-summary">
       <p class="gameover-score"><span>FINAL SCORE</span><strong id="finalScore">${run.pilot.score.toLocaleString('en-GB')}</strong></p>
-      <div class="menu-actions">${button('relaunch', 'CONTINUE', 'id="launchButton"')}${warpBackButton(run)}${button('title', 'TITLE SCREEN')}</div>`];
+      ${profile ? highScoreEntry(profile, run) : ''}
+      <div class="menu-actions gameover-actions">${button('relaunch', 'CONTINUE', 'id="launchButton"')}${button('title', 'TITLE SCREEN')}</div>
+      ${run.practice ? `<div class="menu-actions">${warpBackButton(run)}</div>` : ''}</div>
+      ${profile ? `<section class="gameover-records" aria-labelledby="gameoverRecordsTitle"><h2 id="gameoverRecordsTitle">HIGH SCORES</h2><p class="briefing-status">${MODE_INFO[run.mode].name}</p>${highScoreTable(profile, run.mode)}</section>` : ''}`];
   }
-  static victory(run: RunState): MenuView {
-    return ['victory', 'JOURNEY COMPLETE', run.continued ? 'CONTINUED FLIGHT' : 'ARCADE JOURNEY', `<p class="result-score">${run.pilot.score} POINTS</p><p>All ${JOURNEY_STAGE_COUNT} stages cleared.</p><div class="menu-actions">${button('title', 'TITLE SCREEN', 'id="launchButton"')}</div>`];
+  static victory(run: RunState, profile?: ProfileSaveV2): MenuView {
+    return ['victory', 'JOURNEY COMPLETE', run.continued ? 'CONTINUED FLIGHT' : 'ARCADE JOURNEY', `<p class="result-score">${run.pilot.score} POINTS</p><p>All ${JOURNEY_STAGE_COUNT} stages cleared.</p>${profile ? highScoreEntry(profile, run) : ''}<div class="menu-actions">${button('title', 'TITLE SCREEN', 'id="launchButton"')}</div>`];
   }
 }

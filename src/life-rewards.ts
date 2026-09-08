@@ -5,7 +5,7 @@ import type { GameMode } from './modes';
 
 export const lifeScoreInterval = (mode: GameMode): number => mode === 'invaders' ? INVADER_EXTRA_LIFE_SCORE : SMUGGLER_EXTRA_LIFE_SCORE;
 export function awardScoreLives(run: RunState): number {
-  if (run.mode !== 'invaders' && run.mode !== 'smuggler') return 0;
+  if (run.mode !== 'invaders' && run.mode !== 'smuggler' && run.mode !== 'tunnels') return 0;
   const interval = lifeScoreInterval(run.mode);
   const awards = Math.max(0, 1 + Math.floor((run.pilot.score - run.nextLifeScore) / interval));
   const gained = Math.min(5 - run.lives, awards);

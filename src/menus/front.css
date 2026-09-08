@@ -1,0 +1,69 @@
+/* The title keeps choices compact; only the selected loadout occupies the preview column. */
+.launch-overlay[data-mode="title"] { padding: 16px 24px; }
+.launch-overlay[data-mode="title"] .arcade-menu { width: min(1000px, 100%); }
+.launch-overlay[data-mode="title"] .vector-title { height: 64px; margin: 6px auto; }
+.launch-overlay[data-mode="title"] .arcade-header > .briefing-status:empty { display: none; }
+.launch-overlay[data-mode="title"] .menu-layout { grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.25fr); grid-template-areas: "modes preview" "weapons weapon" "tools actions"; gap: 16px 40px; margin-top: 18px; }
+.launch-overlay[data-mode="title"] #screenContent, .launch-overlay[data-mode="title"] #modePreviewSection { display: contents; }
+.title-modes { grid-area: modes; min-width: 0; }
+.title-loadout { grid-area: weapons; min-width: 0; }
+.title-secondary { grid-area: tools; min-width: 0; }
+.title-play { grid-area: actions; }
+#titleModePreview { grid-area: preview; min-width: 0; }
+#weaponPreviewCopy { grid-area: weapon; min-width: 0; }
+.launch-overlay[data-mode="title"] .mode-select { grid-template-columns: minmax(0, 1fr); gap: 2px; margin-top: 6px; }
+.launch-overlay .mode-select button { min-height: 40px; }
+.launch-overlay[data-mode="title"] .mode-select button { padding: 8px 10px; min-height: 40px; }
+.launch-overlay[data-mode="title"] .menu-actions { gap: 4px; margin-top: 0; align-self: start; }
+.launch-overlay[data-mode="title"] .menu-actions button { font-size: 18px; gap: 16px; padding: 8px; }
+.title-play-buttons { display: flex; align-items: stretch; justify-content: center; gap: 12px; }
+.launch-overlay[data-mode="title"] .title-play-buttons button { min-width: 0; font-size: 16px; gap: 8px; padding: 8px 4px; }
+.launch-overlay[data-mode="title"] .title-tools { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 0; gap: 2px 8px; }
+.title-tools #levelWarpButton { grid-column: 1 / -1; }
+.launch-overlay[data-mode="title"] .loadout-heading { margin-top: 0; }
+.launch-overlay[data-mode="title"] .title-play .record-line { margin: 0 0 6px; text-align: center; }
+.mode-preview-copy { min-height: 104px; }
+.mode-preview-copy h2 { margin: 0 0 8px; font-size: 20px; color: #ffff70; }
+.mode-preview-copy > p { margin: 0; font-size: 13px; color: #8affb0; line-height: 1.5; }
+.launch-overlay[data-mode="title"] .menu-description { min-height: 0; margin: 8px 0 16px; color: #acb7b0; font-size: 12px; }
+.weapon-preview-copy { min-height: 80px; border-top: 1px solid #35423b; padding-top: 12px; }
+.weapon-preview-copy h3 { margin: 0 0 6px; color: #ffff70; font-size: 13px; }
+.launch-overlay[data-mode="title"] .weapon-purpose { min-height: 0; margin: 0 0 10px; }
+.mode-demo { width: min(320px, 100%); height: 120px; margin: 0 auto; }
+.high-score-entry { text-align: center; margin: 20px 0; }
+.high-score-entry h2 { color: #8affb0; font-size: 18px; margin: 0 0 16px; }
+.high-score-entry label { font-size: 12px; color: #ffff70; }
+.initials-controls { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 16px; margin-top: 10px; }
+#scoreInitials { width: 100px; min-width: 0; padding: 8px; border: 1px solid #8affb0; border-radius: 0; background: #000; color: #ffff70; text-align: center; text-transform: uppercase; font: inherit; font-size: 28px; letter-spacing: 0; }
+#scoreInitials:focus-visible { outline: 2px solid #ffff70; outline-offset: 3px; }
+.launch-overlay .initials-controls button { font-size: 18px; min-height: 48px; }
+#initialsHint, .score-saved { color: #8affb0; font-size: 12px; }
+.score-table th:nth-child(2), .score-table td:nth-child(2) { text-align: center; color: #ffff70; }
+
+/* Keep the exit choices beside each other, ahead of the records on narrow screens. */
+.launch-overlay[data-mode="gameover"] .arcade-menu { max-width: 960px; }
+.launch-overlay[data-mode="gameover"] .menu-layout { max-width: none; }
+.launch-overlay[data-mode="gameover"] #screenContent { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 32px; align-items: start; }
+.gameover-summary, .gameover-records { min-width: 0; }
+.gameover-summary .score-saved { text-align: center; }
+.gameover-records h2 { margin: 0 0 8px; font-size: 18px; color: #ffff70; }
+.gameover-records > .briefing-status { margin: 0 0 12px; font-size: 12px; }
+.gameover-records .score-table th, .gameover-records .score-table td { padding: 8px 4px; }
+.gameover-actions { flex-direction: row; justify-content: center; gap: 12px; }
+.launch-overlay .gameover-actions button { min-width: 0; font-size: 16px; gap: 8px; padding: 8px 4px; }
+
+@media (max-width: 760px) {
+  .launch-overlay[data-mode="gameover"] .arcade-menu { max-width: 480px; }
+  .launch-overlay[data-mode="gameover"] #screenContent { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .launch-overlay[data-mode="gameover"] .menu-layout { margin-top: 16px; }
+  .gameover-score { margin-top: 0; }
+  .gameover-records .score-table th, .gameover-records .score-table td { padding: 6px 2px; }
+  .launch-overlay[data-mode="title"] { padding: 16px 20px; }
+  .launch-overlay[data-mode="title"] .arcade-menu { max-width: 480px; }
+  .launch-overlay[data-mode="title"] .vector-title { height: 72px; }
+  .launch-overlay[data-mode="title"] .menu-layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "modes" "preview" "weapons" "weapon" "tools" "actions"; gap: 16px; margin-top: 12px; }
+  .launch-overlay[data-mode="title"] .mode-select { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .launch-overlay[data-mode="title"] .mode-select button { min-height: 44px; font-size: 12px; }
+  .mode-preview-copy, .weapon-preview-copy { min-height: 0; }
+  .mode-preview-copy h2 { font-size: 18px; }
+}

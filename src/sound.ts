@@ -200,8 +200,8 @@ export class SoundBank {
     if (event.type === 'fire') this.enemyShoot(event.voice, event.distance); else this.cue(event.cue);
   }
   cue(cue: FeedbackCue): void {
-    const priority = ['extraLife', 'policeDispatch', 'policeScan', 'lockOn', 'exitGate', 'gateMiss'].includes(cue);
-    this.play(cue, cue === 'score' ? 0.4 : cue === 'extraLife' ? 0.95 : 0.75, priority, cue === 'lockOn' ? 0.45 : 0.055);
+    const priority = ['extraLife', 'policeDispatch', 'policeArrival', 'policeScan', 'lockOn', 'exitGate', 'gateMiss'].includes(cue);
+    this.play(cue, cue === 'score' ? 0.4 : cue === 'extraLife' ? 0.95 : 0.75, priority, cue === 'policeArrival' ? 1.2 : cue === 'lockOn' ? 0.45 : 0.055);
   }
   pickup(): void { this.cue('pickup'); }
   miss(): void { this.cue('miss'); }

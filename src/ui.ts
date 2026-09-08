@@ -8,9 +8,9 @@ import { MenuShell } from './menus/menu-shell';
 import { createCatalog, disposeObject } from './models';
 import { drawVectorTitle } from './vector-title';
 import { ModePreview } from './menus/mode-preview';
-import { MODE_INFO } from './modes';
 import { ObjectScan } from './menus/object-scan';
 import type { GameMode } from './modes';
+import type { MenuPreview } from './menus/views';
 
 export class GameUI {
   readonly viewport: HTMLDivElement;
@@ -35,11 +35,10 @@ export class GameUI {
   }
   selectMode(mode: GameMode): void {
     if (this.demo?.mode !== mode) { this.demo?.dispose(); this.demo = new ModePreview(mode); }
-    this.text('modePreviewName', MODE_INFO[mode].name); this.text('modePreviewTagline', MODE_INFO[mode].summary);
   }
   text(id: string, value: string): void { this.shell.text(id, value); }
-  show(screen: string, title: string, status: string, content: string): void {
-    this.shell.show(screen, title, status, content);
+  show(screen: string, title: string, status: string, content: string, preview?: MenuPreview): void {
+    this.shell.show(screen, title, status, content, preview);
     // Reuse one preview renderer/context between the title demo and object guide.
     document.querySelector(screen === 'title' ? '#modeDemo' : '#modelPreview')!.append(this.preview.domElement);
     this.resize();
@@ -49,8 +48,10 @@ export class GameUI {
     const canvas = document.querySelector<HTMLCanvasElement>('#vectorTitle')!;
     drawVectorTitle(canvas, this.shell.title, this.screen === 'gameover' ? '#ff5050' : '#ffff70');
     const bounds = document.querySelector(this.screen === 'title' ? '#modeDemo' : '#modelPreview')!.getBoundingClientRect();
-    const width = Math.max(180, bounds.width);
-    const height = Math.max(160, bounds.height);
+    // Match the displayed preview even at thumbnail sizes; a minimum backing
+    // height would distort its aspect ratio when CSS makes the title compact.
+    const width = Math.max(1, bounds.width);
+    const height = Math.max(1, bounds.height);
     this.preview.setSize(width, height, false);
     this.previewCamera.aspect = width / height;
     this.previewCamera.updateProjectionMatrix();

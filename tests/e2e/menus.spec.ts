@@ -1,9 +1,9 @@
 import { test, expect } from './fixtures/game';
 
-test('Ships & Objects renders every model with keyboard and mouse navigation', async ({ game, page }) => {
+test('Info Deck renders every model with keyboard and mouse navigation', async ({ game, page }) => {
   await game.open(); await game.action('objects');
-  await expect(page.locator('#launchTitle')).toHaveText('SHIPS & OBJECTS');
-  await expect(page.locator('#catalogSection .briefing-status')).toHaveText('SHIPS & OBJECTS');
+  await expect(page.locator('#launchTitle')).toHaveText('INFO DECK');
+  await expect(page.locator('#catalogSection .briefing-status')).toHaveText('INFO DECK');
   const initial = (await game.state()).briefingCount;
   await page.locator('[data-action="scanNext"]').click();
   expect((await game.state()).briefingCount).not.toBe(initial);
@@ -21,11 +21,11 @@ for (const width of [1440, 1024, 650, 390, 320]) {
     await page.setViewportSize({ width, height: width > 650 ? 900 : 844 }); await game.open();
     await game.layout(); await game.screenshot(`title-${width}`, '.arcade-menu');
     await game.action('controls');
-    for (const scheme of ['wasd', 'arrows', 'mouse']) {
+    for (const scheme of ['touch', 'mouse']) {
       await game.action(`controls:${scheme}`); await game.layout();
       await game.screenshot(`${scheme}-controls-${width}`, '.controls-card');
     }
-    await expect(page.locator('.controls-card')).not.toContainText('Browse ships & objects');
+    await expect(page.locator('.controls-card')).not.toContainText('Browse entries');
     await game.action('title'); await game.action('objects');
     await game.screenshot(`ships-objects-title-${width}`, '#vectorTitle');
     const placement = await page.locator('.scan-hint').evaluate(hint => {

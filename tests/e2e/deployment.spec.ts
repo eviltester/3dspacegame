@@ -15,9 +15,6 @@ test('production game loads and plays from the GitHub Pages repository path', as
   await expect(page.locator('#launchTitle')).toHaveText('3D VECTOR SPACE SHOOTER');
   await expect(page).toHaveTitle('3D Vector Space Shooter');
   expect(await page.evaluate(() => window.vectorShooterDebug)).toBeUndefined();
-  await page.locator('[data-action="controls"]').click();
-  await page.locator('[data-action="controls:wasd"]').click();
-  await page.locator('[data-action="title"]').click();
   await page.locator('[data-action="newRun"]').click();
   await page.keyboard.press('Enter');
   await expect(page.locator('#launchOverlay')).toBeHidden();

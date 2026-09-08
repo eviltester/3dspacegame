@@ -45,12 +45,18 @@ export class FlightLifecycle {
   showGameOver(): void { this.menu = 'gameover'; this.respawnDelay = 0; }
   damage(run: RunState, amount: number): DamageDecision {
     if (this.menu || this.paused || this.grace > 0 || this.protection > 0 || this.pendingRespawn || run.phase !== 'playing' || !Number.isFinite(amount) || amount <= 0) return { type: 'ignored' };
+    const unshielded = run.pilot.shield <= 0;
     const shield = Math.min(run.pilot.shield, amount);
-    // Invaders doubles only the damage that gets through: a normal bolt still
-    // costs 10 shield, but costs 20 hull when completely unshielded.
-    const hullDamage = (amount - shield) * (run.mode === 'invaders' ? 2 : 1);
-    run.pilot.shield -= shield; run.pilot.hull = Math.max(0, run.pilot.hull - hullDamage);
+    run.pilot.shield -= shield;
     this.grace = 0.28; resetChain(run);
+    // Invaders has no hull buffer. Even a partial shield absorbs this hit;
+    // only a subsequent hit against an already empty shield spends a life.
+    if (run.mode === 'invaders') {
+      if (!unshielded) return { type: 'hit' };
+      run.pilot.hull = 0;
+      return this.fail(run, 'combat');
+    }
+    run.pilot.hull = Math.max(0, run.pilot.hull - (amount - shield));
     return run.pilot.hull <= 0 ? this.fail(run, 'combat') : { type: 'hit' };
   }
   fail(run: RunState, kind: RespawnKind): LifeDecision {

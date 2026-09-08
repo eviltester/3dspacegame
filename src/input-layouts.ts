@@ -32,27 +32,24 @@ interface ControlLayout {
 const keyboard = {
   accelerate: ['KeyR'], brake: ['KeyF'], rollLeft: ['KeyQ'], rollRight: ['KeyE']
 };
+// Fire and blast aliases stay available when the player changes steering layout.
+const combatKeys = { primary: ['Space', 'KeyJ', 'KeyZ'], special: ['KeyK', 'KeyX'] };
+const desktop: ControlLayout = {
+  ...keyboard, ...combatKeys,
+  name: 'MOUSE + KEYS', steering: 'MOUSE / WASD / ARROWS', horizontal: 'Mouse, A / D or Left / Right arrows',
+  fire: 'LEFT CLICK / SPACE / J / Z', blast: 'RIGHT CLICK / K / X',
+  up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight']
+};
 
 export const CONTROL_LAYOUTS: Record<ControlScheme, ControlLayout> = {
   touch: {
+    ...combatKeys,
     name: 'TOUCH / TILT', steering: 'TILT / DRAG', horizontal: 'Tilt / drag', fire: 'LEFT SIDE', blast: 'TAP RIGHT SIDE',
-    up: [], down: [], left: [], right: [], primary: ['Space'], special: [],
+    up: [], down: [], left: [], right: [],
     accelerate: [], brake: [], rollLeft: [], rollRight: []
   },
-  mouse: {
-    name: 'MOUSE', steering: 'MOUSE', horizontal: 'Mouse', fire: 'LEFT CLICK', blast: 'RIGHT CLICK',
-    up: [], down: [], left: [], right: [], primary: ['Space'], special: [],
-    accelerate: ['KeyW', 'ArrowUp'], brake: ['KeyS', 'ArrowDown'],
-    rollLeft: ['KeyA', 'ArrowLeft'], rollRight: ['KeyD', 'ArrowRight']
-  },
-  wasd: {
-    ...keyboard, name: 'WASD', steering: 'W / A / S / D', horizontal: 'A / D', fire: 'J', blast: 'K',
-    up: ['KeyW'], down: ['KeyS'], left: ['KeyA'], right: ['KeyD'], primary: ['KeyJ', 'Space'], special: ['KeyK']
-  },
-  arrows: {
-    ...keyboard, name: 'ARROWS + Z/X', steering: 'ARROW KEYS', horizontal: 'Left / Right arrows', fire: 'Z', blast: 'X',
-    up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'], primary: ['KeyZ', 'Space'], special: ['KeyX']
-  }
+  // Saved desktop preferences all resolve to the same simultaneous bindings.
+  mouse: desktop, wasd: desktop, arrows: desktop
 };
 
 export function isControlScheme(value: unknown): value is ControlScheme {

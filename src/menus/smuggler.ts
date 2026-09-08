@@ -11,8 +11,8 @@ export class SmugglerMenus {
   static briefing(run: RunState, scheme: ControlScheme): MenuView {
     const leg = smugglerLeg(run.stage);
     const instructions = leg.kind === 'asteroids'
-      ? 'Dodge rocks and collect yellow salvage. Later belts include pirates and police who fire at your skiff. Intercepting fire pays +10. Each missed projectile costs 50 points. Rocks can drop a blue shield (1 in 15) or pink full repair (1 in 30). Fly through green EXIT.'
-      : `Crates have a 20% chance of releasing yellow haul. Collect it to deliver it. Guns pay +200; intercepted shots +10; missed shots -50 each. ${CANYON_GATE_SCORING_BRIEF} Guns mount on the floor, canyon walls and fixed pillar tops. Dodge barriers and find EXIT in the final wall.`;
+      ? 'Dodge rocks and collect yellow salvage. Later belts include pirates and police who fire at your skiff. Intercepting fire pays +10. Each missed projectile costs 50 points. Rocks can drop a blue shield or pink full repair. Fly through green EXIT.'
+      : `Shooting crates might release yellow haul. Collect it to deliver it. Guns pay +200; intercepted shots +10; missed shots -50 each. ${CANYON_GATE_SCORING_BRIEF} Guns mount on the floor, canyon walls and fixed pillar tops. Dodge barriers and find EXIT in the final wall.`;
     return ['briefing', 'SMUGGLER RUN', `LEG ${run.stage} / ${leg.kind === 'asteroids' ? 'ASTEROID BELT' : 'CANYON RUN'} / DIFFICULTY ${leg.difficulty}`, `
       <section class="mission-briefing"><h2 id="missionBriefTitle">DELIVER THE HAUL</h2><p id="missionBriefObjective">${instructions} Speed is automatic. ${boostControls(scheme)}</p><p id="missionBriefCaution">${flightControls(scheme)} Hits recharge blast +5%; interceptions +10%. No charging delays.</p></section>
       <p class="menu-description">One skiff per life. Shield absorbs impacts first; at zero shield, hits fill DAMAGE. At 100 damage you lose a life. Large/medium/small rocks: 50/30/20. Ships and crates: 40. Walls, floor and enemy shots: 20. Pillars/barriers: 50. Blue pickups add 20 shield and repair 20 damage; pink pickups fully repair.</p>

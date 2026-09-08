@@ -10,5 +10,5 @@ export function canyonTargetPoints(kind: 'obstacle' | 'turret' | 'hostileBolt'):
   return kind === 'turret' ? 200 : kind === 'hostileBolt' ? 10 : 0;
 }
 
-export const CANYON_COMBAT_BRIEF = 'Crates pay no points when shot: 1 in 5 releases yellow haul. Collect it and reach EXIT for 75 points each. Guns pay +200; intercepted shots +10; missed shots -50 each. Walls/floor cost 10 shield or 10 damage when unshielded. At 100 damage, lose one skiff point. Gun and solid-object hits cost 20 shield or one unshielded skiff point.';
-export const CANYON_REPAIR_BRIEF = 'Crates have a 1 in 15 blue shield drop (+1 hull and +20 shield); guns have a 1 in 30 full repair drop. Collect the pickups to repair.';
+export const CANYON_COMBAT_BRIEF = 'Crates pay no points when shot, but might release yellow haul. Collect it and reach EXIT for 75 points each. Guns pay +200; intercepted shots +10; missed shots -50 each. Walls/floor cost 10 shield or 10 damage when unshielded. At 100 damage, lose one skiff point. Gun and solid-object hits cost 20 shield or one unshielded skiff point.';
+export const CANYON_REPAIR_BRIEF = 'Crates can drop blue shields (+1 hull and +20 shield); guns can drop full repairs. Collect the pickups to repair.';

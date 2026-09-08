@@ -5,6 +5,7 @@ import { CONTROL_LAYOUTS, KEYBOARD_LOOK_RATE } from './input-layouts';
 import type { ControlScheme } from './input-layouts';
 import { MobileInput } from './mobile/input';
 import { BoostDrive } from './boost';
+import { TunnelKeys, TUNNEL_KEYS } from './tunnels/input';
 
 export const MIN_THROTTLE = -90;
 export const MAX_THROTTLE = 180;
@@ -40,6 +41,8 @@ export class FlightInput {
   throttle = 65;
   mouseSensitivity = 1;
   autoFlight = false;
+  tunnelControls = false;
+  private readonly tunnelKeys = new TunnelKeys();
   private wheelBoost = 0;
   private boostHeld = false;
   private readonly boostDrive = new BoostDrive();
@@ -100,14 +103,15 @@ export class FlightInput {
       }
       const layout = CONTROL_LAYOUTS[this.scheme];
       const bindings = [layout.up, layout.down, layout.left, layout.right, layout.primary, layout.special, layout.accelerate, layout.brake, layout.rollLeft, layout.rollRight];
-      if (!bindings.some(codes => codes.includes(event.code)) && !['Escape', 'ShiftLeft', 'ShiftRight'].includes(event.code)) return;
+      if (!bindings.some(codes => codes.includes(event.code)) && !['Escape', 'ShiftLeft', 'ShiftRight'].includes(event.code) && !(this.tunnelControls && TUNNEL_KEYS.includes(event.code))) return;
       event.preventDefault();
       this.keys.add(event.code);
+      if (this.tunnelControls) this.tunnelKeys.press(event.code);
       if (layout.primary.includes(event.code) && !event.repeat) this.firePressed = true;
       if (layout.special.includes(event.code) && !event.repeat) this.special();
       if (event.code === 'Escape' && !event.repeat) this.pause();
     });
-    window.addEventListener('keyup', event => this.keys.delete(event.code));
+    window.addEventListener('keyup', event => { this.keys.delete(event.code); this.tunnelKeys.release(event.code); });
     window.addEventListener('blur', () => { if (this.active) this.pause(); });
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.active) this.pause(); });
     document.addEventListener('pointerlockchange', () => {
@@ -115,7 +119,7 @@ export class FlightInput {
     });
   }
   setScheme(scheme: ControlScheme): void {
-    this.clear(); this.scheme = scheme;
+    this.clear(); this.scheme = scheme === 'touch' ? 'touch' : 'mouse';
     this.canvas.classList?.toggle('touch-flight', scheme === 'touch');
     if (scheme !== 'touch') this.mobile.motion.stop();
   }
@@ -127,8 +131,8 @@ export class FlightInput {
     this.active = true;
     this.fallback = false;
     if (this.scheme !== 'mouse') return;
-    // Keyboard flight needs no lock. Some embedded browsers refuse pointer lock;
-    // retain a best-effort mouse fallback instead of making launch fail entirely.
+    // Capture mouse motion for combined desktop input. Keyboard controls also
+    // work when an embedded browser refuses capture and we use the fallback.
     try { if (document.pointerLockElement !== this.canvas) await this.canvas.requestPointerLock(); }
     catch { this.fallback = true; }
   }
@@ -142,7 +146,8 @@ export class FlightInput {
     if (this.middleHold !== null) clearTimeout(this.middleHold);
     this.middleHold = null; this.middlePressed = false;
   }
-  clear(): void { this.firing = false; this.touchFiring = false; this.firePressed = false; this.dx = 0; this.dy = 0; this.wheelBoost = 0; this.boostHeld = false; this.boostDrive.reset(); this.keys.clear(); this.clearMiddle(); this.mobile.clear(); }
+  clear(): void { this.firing = false; this.touchFiring = false; this.firePressed = false; this.dx = 0; this.dy = 0; this.wheelBoost = 0; this.boostHeld = false; this.boostDrive.reset(); this.keys.clear(); this.tunnelKeys.clear(); this.clearMiddle(); this.mobile.clear(); }
+  consumeLaneStep(dt: number): number { return this.active && this.tunnelControls ? this.tunnelKeys.consume(dt) : 0; }
   consumeFire(): boolean {
     const requested = this.active && (this.firing || this.touchFiring || this.firePressed || this.held(CONTROL_LAYOUTS[this.scheme].primary));
     this.firePressed = false;
@@ -164,7 +169,7 @@ export class FlightInput {
     if (!this.autoFlight && this.held(layout.brake)) this.throttle = Math.max(MIN_THROTTLE, this.throttle - dt * 100);
     const boost = this.boostHeld || this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.wheelBoost > 0;
     this.wheelBoost = Math.max(0, this.wheelBoost - dt);
-    const value = { x: this.dx + (Number(this.held(layout.right)) - Number(this.held(layout.left))) * KEYBOARD_LOOK_RATE * dt,
+    const value = { x: this.dx + (this.tunnelControls ? 0 : (Number(this.held(layout.right)) - Number(this.held(layout.left))) * KEYBOARD_LOOK_RATE * dt),
       y: this.dy + (Number(this.held(layout.down)) - Number(this.held(layout.up))) * KEYBOARD_LOOK_RATE * dt,
       roll: Number(this.held(layout.rollLeft)) - Number(this.held(layout.rollRight)),
       speed: this.autoFlight ? this.throttle : this.boostDrive.step(dt, this.throttle, boost), boost };

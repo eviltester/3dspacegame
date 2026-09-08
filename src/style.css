@@ -17,6 +17,7 @@ button { font: inherit; }
 .screen-reader-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
 .hud { pointer-events: none; position: absolute; inset: 0; color: #8affb0; }
+.flight-status { display: contents; }
 .hud-panel { position: absolute; min-width: 172px; padding: 8px 10px; }
 .sector-panel { top: 18px; left: 18px; }
 .mission-panel { top: 18px; left: 50%; transform: translateX(-50%); width: min(360px, calc(100% - 450px)); text-align: center; }
@@ -212,6 +213,21 @@ button { font: inherit; }
 .launch-overlay .settings-row button, .launch-overlay .shop-row button { padding: 8px; gap: 0; min-height: 40px; font-size: 13px; color: #acb7b0; border-bottom: 1px solid #3b4540; }
 .launch-overlay .mode-select button { min-height: 82px; padding: 10px; }
 .mode-select button, .family-select button { flex: 1; }
+.mode-select button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.tunnel-hud #radar, .tunnel-hud #reticle, .tunnel-hud .bottom-strip > div:nth-child(4) { display: none; }
+.tunnel-hud .bottom-strip { left: 20px; right: auto; width: 200px; bottom: 20px; display: block; max-width: none; }
+.tunnel-hud .bottom-strip > div:nth-child(3) { max-width: 200px; }
+.tunnel-hud .arcade-strip { left: 230px; bottom: 36px; }
+.tunnel-hud .message-log { bottom: 110px; }
+.tunnel-hud .hit-callout { top: 204px; background: transparent; }
+.tunnel-collapse .mission-panel, .tunnel-collapse .message-log, .tunnel-collapse #hitCallout { display: none; }
+@media (max-width: 600px) {
+  .tunnel-hud .bottom-strip { width: 110px; }
+  .tunnel-hud .bottom-strip > div:nth-child(3) { max-width: 110px; }
+  .tunnel-hud .arcade-strip { left: 140px; bottom: 35px; }
+  .tunnel-hud .mission-panel { width: 50%; }
+  .tunnel-hud .hud-value { white-space: normal; }
+}
 .launch-overlay button[aria-pressed="true"] { color: #ffff70; border-color: #ffff70; }
 .launch-overlay .mode-select button::before, .launch-overlay .mode-select button::after,
 .launch-overlay .family-select button::before, .launch-overlay .family-select button::after,
@@ -244,6 +260,7 @@ button { font: inherit; }
 .survival-stats span { display: block; font-size: 11px; color: #ffff70; }
 .survival-stats strong { display: block; margin-top: 6px; font-size: 22px; color: #ededed; }
 .survival-stats .danger { color: #ff7777; }
+.tunnel-hud .survival-stats { width: 220px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .smuggler-hud .cargo-panel { width: 190px; min-width: 0; }
 .smuggler-hud .cargo-panel .hud-small { white-space: normal; overflow-wrap: anywhere; }
 .smuggler-hud .sector-panel { top: 114px; width: 38%; }
@@ -262,6 +279,7 @@ button { font: inherit; }
 }
 @media (max-width: 760px) {
   .survival-stats { left: 12px; right: 34%; width: auto; }
+  .tunnel-hud .survival-stats { width: auto; }
   .smuggler-hud .cargo-panel { width: 30%; }
 }
 @media (max-height: 540px) {
@@ -342,4 +360,32 @@ button { font: inherit; }
   .touch-controls .bottom-strip { left: 120px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .touch-controls .arcade-strip { bottom: 94px; left: 120px; }
   .touch-controls .message-log { bottom: 120px; min-height: 0; }
+}
+
+/* Invaders keeps its survival and weapon readouts in one score-side cluster.
+   Other modes retain their independently positioned HUD panels. */
+.invaders-hud .flight-status { position: absolute; top: 24px; right: 28px; width: 320px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 16px; }
+.invaders-hud .flight-status > * { position: static; width: auto; min-width: 0; max-width: none; margin: 0; }
+.invaders-hud .cargo-panel { grid-column: 2; grid-row: 1; padding: 0; }
+.invaders-hud .survival-stats { grid-column: 1; grid-row: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.invaders-hud .bottom-strip { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.invaders-hud .bottom-strip > div { min-height: 0; padding: 4px 0; }
+.invaders-hud .bottom-strip > div:last-child { grid-column: auto; text-align: right; }
+.invaders-hud .bottom-strip strong { font-size: 14px; }
+.invaders-hud .arcade-strip { grid-column: 1 / -1; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; line-height: 1.4; }
+.invaders-hud .arcade-strip span:last-child { flex-basis: auto; }
+.invaders-hud .message-log { right: 15px; bottom: 22px; width: min(420px, calc(100% - 164px)); min-height: 0; }
+@media (min-width: 761px) and (max-width: 1080px) {
+  .invaders-hud .sector-panel { width: calc(100% - 370px); }
+  .invaders-hud .mission-panel { top: 90px; left: 15px; right: auto; width: calc(100% - 370px); transform: none; text-align: left; }
+  .invaders-hud .level-timer { justify-content: flex-start; }
+  .invaders-hud .flight-buttons { top: 160px; }
+}
+@media (max-width: 760px) {
+  .invaders-hud .flight-status { top: 20px; left: 15px; right: 15px; width: auto; gap: 8px 16px; }
+  .invaders-hud .sector-panel, .invaders-hud .mission-panel { top: 174px; width: calc(50% - 22px); }
+  .invaders-hud .mission-panel .hud-value { white-space: normal; }
+  .invaders-hud .level-timer { flex-wrap: wrap; }
+  .invaders-hud .flight-buttons { top: 252px; }
+  .invaders-hud .hit-callout { top: 300px; }
 }
