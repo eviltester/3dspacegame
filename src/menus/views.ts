@@ -12,22 +12,25 @@ import type { StageDefinition } from '../encounters';
 import { WARP_BONUSES } from '../level-warp';
 import { button } from './menu-shell';
 import { FrontMenus } from './front';
-import { SmugglerMenus } from './smuggler';
-import { MODE_INFO, INVADER_EXTRA_LIFE_SCORE } from '../modes';
-import { WEAPON_HELP, weaponSpec } from '../weapons';
-import { invaderMissCost } from '../combat/accuracy';
+import { MODE_INFO } from '../modes';
+import { WEAPON_HELP } from '../weapons';
 import { CONTROL_LAYOUTS } from '../input-layouts';
 import type { ControlScheme } from '../input-layouts';
-import { tunnelBriefing } from '../tunnels/menus';
 import { highScoreEntry, highScoreTable } from './high-score';
+import type { TitleTab } from './information-tabs';
 
-export interface MenuPreview { mode: string; weapon: string }
+export interface MenuPreview {
+  mode: string; weapon: string;
+  tab?: TitleTab;
+  loadout?: string; actions?: string;
+  instructions?: string; controls?: string; scores?: string;
+}
 export type MenuView = [screen: string, title: string, status: string, content: string, preview?: MenuPreview];
 const warpBackButton = (run: RunState | null): string => run?.practice ? button('levelWarp', 'CHOOSE LEVEL') : '';
 
 export class MenuViews {
-  static title(profile: ProfileSaveV2, selectedMode: GameMode, selectedFamily: WeaponFamily, levelWarpUnlocked: boolean): MenuView {
-    return FrontMenus.title(profile, selectedMode, selectedFamily, levelWarpUnlocked);
+  static title(profile: ProfileSaveV2, selectedMode: GameMode, selectedFamily: WeaponFamily, levelWarpUnlocked: boolean, tab: TitleTab = 'game'): MenuView {
+    return FrontMenus.title(profile, selectedMode, selectedFamily, levelWarpUnlocked, tab);
   }
   static levelWarp(run: RunState | null): MenuView {
     const stages = Array.from({ length: JOURNEY_STAGE_COUNT }, (_, index) => {
@@ -37,28 +40,24 @@ export class MenuViews {
     return ['levelWarp', 'LEVEL WARP', 'TEST FLIGHT / SAVED PROGRESS SAFE', `
       <div class="warp-picker"><label for="warpStage">JOURNEY STAGE</label><select id="warpStage">${stages}</select>${button('warpJourney', 'WARP TO STAGE')}</div>
       <div class="warp-picker"><label for="warpWave">ATTACK CHALLENGE WAVE</label><input id="warpWave" type="number" min="1" max="${Number.MAX_SAFE_INTEGER - 1}" step="1" value="${run?.mode === 'endless' ? run.stage : 1}" required>${button('warpEndless', 'WARP TO WAVE')}</div>
-      <div class="warp-picker"><label for="warpInvaders">INVADERS WAVE</label><input id="warpInvaders" type="number" min="1" max="1000000" step="1" value="1" required>${button('warpInvaders', 'WARP TO INVADERS')}</div>
+      <div class="warp-picker"><label for="warpInvaders">DEFENSIVE POSITION WAVE</label><input id="warpInvaders" type="number" min="1" max="1000000" step="1" value="1" required>${button('warpInvaders', 'WARP TO DEFENSIVE POSITION')}</div>
       <div class="warp-picker"><label for="warpSmuggler">SMUGGLER RUN LEG</label><input id="warpSmuggler" type="number" min="1" max="1000000" step="1" value="1" required>${button('warpSmuggler', 'WARP TO SMUGGLER')}</div>
       <div class="warp-picker"><label for="warpTunnels">TEMPESTUOUS TUNNELS</label><input id="warpTunnels" type="number" min="1" max="1000000" step="1" value="1" required>${button('warpTunnels', 'WARP TO TUNNEL')}</div>
       <div class="warp-picker"><h2>BONUS SORTIES</h2><label for="warpDifficulty">DIFFICULTY</label><select id="warpDifficulty">${Array.from({ length: BONUS_DIFFICULTY_LEVELS }, (_, i) => `<option value="${i + 1}">${i + 1}${i === 0 ? ' / FIRST RUN' : i === BONUS_DIFFICULTY_LEVELS - 1 ? ' / MAXIMUM' : ''}</option>`).join('')}</select>${(Object.keys(WARP_BONUSES) as BonusKind[]).map(kind => button(`warpBonus:${kind}`, BONUS_NAMES[kind])).join('')}</div>
       <div class="menu-actions">${button('title', 'TITLE SCREEN')}</div>`];
   }
   static briefing(run: RunState, definition: StageDefinition, scheme: ControlScheme = 'mouse'): MenuView {
-    if (run.mode === 'tunnels') return tunnelBriefing(run, scheme);
-    if (run.mode === 'smuggler') return SmugglerMenus.briefing(run, scheme);
-    const armada = definition.kind === 'armada' && (!run.cleared || run.mode === 'invaders');
+    const armada = definition.kind === 'armada' && !run.cleared;
     const layout = CONTROL_LAYOUTS[scheme];
     const caution = `${armada ? `${layout.horizontal} moves LEFT / RIGHT. Fire straight ahead.` : 'Police and green traders are allies. Pirates are red.'} Hold ${layout.fire} to fire. ${layout.blast} uses your charged blast.`;
-    const objective = run.mode === 'invaders' && run.cleared ? 'Formation cleared. Resume for the next wave. Your ship stays in the defensive lane.' : definition.kind === 'armada' && run.cleared
+    const objective = definition.kind === 'armada' && run.cleared
       ? run.phase === 'recovery' ? 'The tractor beam is released. Resume to continue to the next wave.' : 'The tractor beam is released. Fly through the Warp Gate to continue.'
       : definition.objective;
     return ['briefing', definition.title.replace(/\d+/g, '').trim(), `${MODE_INFO[run.mode].name} / ${MODE_INFO[run.mode].unit} ${run.stage}${run.mode === 'journey' ? ` / ${JOURNEY_STAGE_COUNT}` : ''}`, `
       <section class="mission-briefing"><p class="briefing-status">MISSION BRIEFING</p><h2 id="missionBriefTitle">${definition.title}</h2><p id="missionBriefObjective">${objective}</p><p id="missionBriefCaution">${caution}</p><p id="missionBriefReward">REWARD CR ${200 + Math.min(20, run.stage) * 35 + (run.stage === 1 ? 150 : 0)}</p></section>
-      <p class="menu-description">TIME BONUS: ${formatStageTime(run)} remaining. ${TIME_BONUS_RATE} CR per whole second left ${run.mode === 'invaders' || (run.mode === 'endless' && run.stage % 5 !== 0) ? 'when the next wave starts' : 'at the Warp Gate'}. Zero ends the bonus, not the mission.</p>
-      ${run.mode === 'invaders' ? '<p class="menu-description">One blast per wave. Charge keeps building after use, ready for the next wave.</p>' : ''}
-      ${run.mode === 'invaders' ? `<p class="menu-description">MISS COST: 11+ aliens -${invaderMissCost(11)} / 6-10 aliens -${invaderMissCost(6)} / 0-5 aliens -${invaderMissCost(5)} points per bolt, counted when fired. Spread fires three separately scored bolts; alien hits and interceptions count toward wave accuracy. Aliens take firing turns and recover faster as waves advance.</p><p class="menu-description">Extra life every ${INVADER_EXTRA_LIFE_SCORE.toLocaleString('en-GB')} points, up to five lives. Destroyed aliens might release pickups that restore some shield. Once your shield is empty, the next hit costs a life. Weapon cores upgrade your equipped weapon. Respawn shields last three seconds.</p><p class="run-loadout">COOLDOWNS: ${FAMILIES.map(f => `${f.toUpperCase()} ${weaponSpec(f, run.tiers[f], run.mode).cooldown.toFixed(2)}s`).join(' / ')}</p>` : ''}
-      <p class="run-loadout">${run.lives} LIVES / ${run.family.toUpperCase()} ${run.tiers[run.family]} / ${definition.waves.length} ${run.mode === 'invaders' ? 'ALIEN' : 'PIRATE'} FLIGHTS</p>
-      <div class="menu-actions">${button('launch', 'START MISSION', 'id="launchButton"')}${warpBackButton(run)}${button('title', 'TITLE SCREEN')}</div>`];
+      <p class="menu-description">TIME BONUS: ${formatStageTime(run)} remaining. ${TIME_BONUS_RATE} CR per whole second left ${run.mode === 'endless' && run.stage % 5 !== 0 ? 'when the next wave starts' : 'at the Warp Gate'}. Zero ends the bonus, not the mission.</p>
+      <p class="run-loadout">${run.lives} LIVES / ${run.family.toUpperCase()} ${run.tiers[run.family]} / ${definition.waves.length} PIRATE FLIGHTS</p>
+      <div class="menu-actions">${button('launch', 'START MISSION', 'id="launchButton"')}</div>`];
   }
   static shop(run: RunState): MenuView {
     const choices: Array<[Purchase, string]> = [['tier', `${run.family.toUpperCase()} TIER ${Math.min(3, run.tiers[run.family] + 1)}`], ['repair', 'REPAIR +50 HULL / +60 SHIELD'], ['shield', 'SHIELD CAPACITY +25'], ['magnet', 'CARGO MAGNET 35']];

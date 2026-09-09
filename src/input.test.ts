@@ -221,6 +221,16 @@ it('holding the wheel pauses without cycling on release', async () => {
   expect(weapon).not.toHaveBeenCalled(); expect(pause).toHaveBeenCalledOnce();
 });
 
+it('suppresses flight during cinematics without cancelling hold-to-pause', async () => {
+  vi.useFakeTimers();
+  const { input, mouse, key, weapon, pause } = weaponInputFixture(); await input.engage();
+  mouse(true); mouse(true, 0); key('KeyD'); input.injectLook(50, 20);
+  for (let tick = 0; tick < 6; tick++) { input.clearFlight(); vi.advanceTimersByTime(MOUSE_PAUSE_HOLD_MS / 6); }
+  expect(input.consumeFire()).toBe(false); expect(input.consume(1)).toMatchObject({ x: 0, y: 0, boost: false });
+  expect(pause).toHaveBeenCalledOnce(); mouse(false);
+  expect(weapon).not.toHaveBeenCalled();
+});
+
 it('clears pending wheel holds on release/pause so they cannot fire after resume', async () => {
   vi.useFakeTimers();
   const { input, mouse, weapon, pause } = weaponInputFixture(); await input.engage();

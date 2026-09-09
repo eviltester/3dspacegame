@@ -21,7 +21,7 @@ function bonus(kind: 'asteroids' | 'canyon' | 'sequence'): NonNullable<HudFrame[
   return { state: { kind, difficulty: 4, points: 10, health: 2, shield: kind === 'canyon' ? 100 : 0, damage: 0, haul: 0, family: 'spread', charge: 100, remaining: 23.4, targetCount: 22, nextMarker: 4, shotsFired: 7 } };
 }
 describe('resource display is a projection, not independently updated state', () => {
-  it('hides the whole hull stat only in Invaders and restores it when modes change', () => {
+  it('hides the whole hull stat only in Defensive Position and restores it when modes change', () => {
     const f = frame('invaders');
     for (const menu of ['', 'pause', 'gameover', 'title']) {
       f.menu = menu;
@@ -36,7 +36,7 @@ describe('resource display is a projection, not independently updated state', ()
       expect(buildHud(f).classes).toContainEqual({ selector: '.game-shell', name: 'invaders-hud', active: false });
     }
   });
-  it('groups live Invaders shield and lives by score without duplicate bottom readouts', () => {
+  it('groups live Defensive Position shield and lives by score without duplicate bottom readouts', () => {
     const f = frame('invaders'); f.run.lives = 2; f.run.pilot.shield = 37; f.run.skiff.shield = 100;
     const model = buildHud(f);
     expect(model.text).toMatchObject({ topLives: '2', topShield: '37' });
@@ -76,6 +76,25 @@ describe('resource display is a projection, not independently updated state', ()
     }
     f.menu = 'pause'; expect(buildHud(f).hidden['#lifeLost']).toBe(true);
     f.menu = ''; f.respawnDelay = 0; expect(buildHud(f).hidden['#lifeLost']).toBe(true);
+  });
+  it('shows Ship Destroyed centrally, removes it during warp-in and restores normal HUD after respawn', () => {
+    const f = frame('invaders'); f.respawnDelay = 4; f.run.lives = 2;
+    expect(buildHud(f).hidden['#lifeLost']).toBe(false);
+    expect(buildHud(f).text).toMatchObject({ lifeLostHeading: 'SHIP DESTROYED', lifeLostLives: '2 LIVES LEFT' });
+    f.respawnDelay = 1.2; expect(buildHud(f).hidden['#lifeLost']).toBe(true);
+    f.respawnDelay = 0; f.protection = 3;
+    expect(buildHud(f).text.topLives).toBe('2'); expect(buildHud(f).hidden['#protectionLayer']).toBe(false);
+  });
+  it.each(['departing', 'arriving'] as const)('shows %s wave status without skip controls', phase => {
+    const f = frame('invaders'); f.defensiveSequence = phase; f.run.phase = 'recovery';
+    const hud = buildHud(f);
+    expect(hud.hidden['#nextWaveButton']).toBe(true); expect(hud.hidden['#touchTools']).toBe(true);
+    expect(hud.text.missionTitle).toBe(phase === 'departing' ? 'WARPING TO NEXT WAVE' : 'ARRIVING AT WAVE 1');
+  });
+  it('keeps the explicit last-alien bonus visible ahead of ordinary score popups', () => {
+    const f = frame('invaders'); f.escapeBonusTime = 2; f.popupTime = 0;
+    expect(buildHud(f).text.scorePopup).toBe('LAST ALIEN +500 BONUS'); expect(buildHud(f).styles['#scorePopup'].opacity).toBe('1');
+    f.escapeBonusTime = 0; expect(buildHud(f).styles['#scorePopup'].opacity).toBe('0');
   });
   it.each([true, false])('shows paid finish bonuses and cargo without recalculating score, clean exit %s', clean => {
     const f = frame('smuggler'); f.intermission = 3; f.run.stageHaul = clean ? 3 : 0;
@@ -136,13 +155,13 @@ describe('resource display is a projection, not independently updated state', ()
     pickup(f.run, { type: 'shieldCell', amount: 1 }); pickup(f.run, { type: 'legalCargo', amount: 2 }); pickup(f.run, { type: 'contraband', amount: 1 });
     const model = buildHud(f); expect(model.text.hullReadout).toBe('40'); expect(model.text.shieldReadout).toBe('50 / 100'); expect(model.text.cargoReadout).toBe('CARGO 2 / X 1');
   });
-  it('displays Invaders accuracy, cooldown and the next-life milestone', () => {
+  it('displays Defensive Position accuracy, cooldown and the next-life milestone', () => {
     const f = frame('invaders'); f.run.accuracy = { shots: 3, hits: 1, misses: 2 }; f.run.nextLifeScore = 40000; f.shotDelay = 0.8;
     const model = buildHud(f); expect(model.text.sectorName).toBe('ACCURACY 33%'); expect(model.text.reputation).toBe('HIT 1/3 / MISS 2');
     expect(model.text.creditReadout).toBe('NEXT LIFE 40,000'); expect(model.text.speedReadout).toBe('0.8s'); expect(model.hidden['.reticle']).toBe(true);
     f.shotDelay = 0; expect(buildHud(f).text.speedReadout).toBe('READY');
   });
-  it('shows the spent Invaders blast and its ongoing charge without claiming it is ready', () => {
+  it('shows the spent Defensive Position blast and its ongoing charge without claiming it is ready', () => {
     const f = frame('invaders'); f.run.blastUsed = true;
     for (const charge of [0, 45, 100]) {
       f.run.charge = charge;
@@ -185,7 +204,7 @@ describe('mission and course readouts', () => {
     f.actors = [...f.actors, actorFixture({ kind: 'part', parent: 1 })];
     expect(buildHud(f).text.missionProgress).toContain('1 OUTER SYSTEMS');
   });
-  it.each(['journey', 'endless', 'invaders'] as const)('%s hides direction indicators only for Invaders without hiding radar contacts', mode => {
+  it.each(['journey', 'endless', 'invaders'] as const)('%s hides direction indicators only for Defensive Position without hiding radar contacts', mode => {
     const f = frame(mode), pirate = actorFixture(); pirate.object.position.set(-50, 0, -100);
     f.actors = [pirate]; f.threat = pirate;
     for (const cleared of [false, true]) {

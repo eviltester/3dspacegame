@@ -10,8 +10,10 @@ import { TunnelSimulation } from '../tunnels/simulation';
 import { TunnelView } from '../tunnels/view';
 import { laneDelta } from '../tunnels/shapes';
 import { BonusController, asteroidFlight, asteroidGap } from '../bonus';
-import { armadaFormationPosition, configureArmadaCamera } from '../armada';
-import { invaderPosition, invaderStage } from '../invaders';
+import { configureArmadaCamera } from '../armada';
+import { invaderStage } from '../invaders';
+import { INVADER_PATTERNS, invaderHome } from '../invader-patterns';
+import { stepInvaderFormation } from '../invader-formation';
 import { createArmadaRig, createBaseModel, createBoltModel, createEnemyModel, createInvaderModel, createPlanetModel, disposeObject } from '../models';
 
 // Thumbnail framing only. Leave the first-person courses at their normal field
@@ -37,6 +39,7 @@ export class ModePreview {
     for (let i = 0; i < count; i++) {
       const role = (['raider', 'diver', 'flanker'] as const)[i % 3];
       const ship = mode === 'invaders' ? createInvaderModel(role) : createEnemyModel(role);
+      if (mode === 'invaders') ship.position.copy(invaderHome(i));
       if (mode !== 'invaders') ship.scale.setScalar(1.35);
       this.fleet.push(ship); this.scene.add(ship);
     }
@@ -92,9 +95,10 @@ export class ModePreview {
     }
     const t = this.elapsed;
     if (this.mode === 'invaders') {
-      const wave = 1 + Math.floor(t / 7) % 4;
+      const wave = 1 + Math.floor(t / 7) % INVADER_PATTERNS.length;
       const speed = invaderStage(wave).difficulty.movementScale;
-      this.fleet.forEach((ship, i) => { ship.position.copy(invaderPosition(armadaFormationPosition(i, this.fleet.length), t, wave, speed)); ship.rotation.y = Math.PI; });
+      stepInvaderFormation(this.fleet.map((ship, slot) => ({ slot, position: ship.position })), dt, t, wave, speed);
+      this.fleet.forEach(ship => { ship.rotation.y = Math.PI; });
       if (this.craft) this.craft.position.x = Math.sin(t) * 55;
     } else {
       this.fleet.forEach((ship, i) => {

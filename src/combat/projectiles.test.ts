@@ -33,7 +33,7 @@ describe('projectile simulation', () => {
     const { spawn, tick, callbacks, target } = fixture();
     const near = target(10, 4), far = target(11, 8);
     spawn(); tick(0.1, [far, near]);
-    expect(callbacks.damageActor).toHaveBeenCalledExactlyOnceWith(near, 12, true);
+    expect(callbacks.damageActor).toHaveBeenCalledExactlyOnceWith(near, 12, true, 'pulse');
   });
   it('allows piercing but never damages the same actor twice', () => {
     const { spawn, tick, callbacks, target, system } = fixture();
@@ -94,13 +94,13 @@ describe('projectile simulation', () => {
     callbacks.playerExpired.mockImplementation(shot => { penalty += tracker.end(shot.id, stats); });
     for (const x of [-20, 0, 20]) {
       system.spawn('player', -1, 0, new THREE.Vector3(x, 0, 0), new THREE.Vector3(0, 0, 1), 100, 12, 0xffffff, 1, 10, 1, 'spread');
-      tracker.begin(system.shots.at(-1)!.id, stats, 1);
+      tracker.begin(system.shots.at(-1)!.id, stats, 'spread');
     }
     const alien = target(10, 50); alien.radius = 2;
     tick(0.5, [alien]); tick(1);
     expect(callbacks.damageActor).toHaveBeenCalledOnce();
-    expect(stats).toEqual({ shots: 3, hits: 1, misses: 2 }); expect(accuracyPercent(stats)).toBe(33); expect(penalty).toBe(100);
-    system.clear(); tick(); expect(penalty).toBe(100);
+    expect(stats).toEqual({ shots: 3, hits: 1, misses: 2 }); expect(accuracyPercent(stats)).toBe(33); expect(penalty).toBe(200);
+    system.clear(); tick(); expect(penalty).toBe(200);
   });
   it('does not report clears as natural misses or report NPC shots in player accuracy', () => {
     const { spawn, system, callbacks, tick } = fixture();

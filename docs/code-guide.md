@@ -15,7 +15,7 @@ This guide explains how the game fits together before you dive into individual f
 
 | Term | Meaning | Examples |
 | --- | --- | --- |
-| Mode | Which overall game you selected | Journey, Attack Challenge, Invaders, Smuggler |
+| Mode | Which overall game you selected | Journey, Attack Challenge, Defensive Position, Smuggler |
 | Run phase | Where the current run is in its progression | briefing, playing, cleared, recovery, shop, gameover |
 | Menu | Which overlay is currently on screen | title, pause, controls, weapons, scores |
 
@@ -57,11 +57,13 @@ Course weapons currently use an immediate ray test with separate visual bolts. T
 
 `RunState` holds current equipment and a separate deep copy of the resources available at the start of the stage. A retry restores equipment and spendable resources but preserves the current score, including deductions. Lives and continued status are outside the snapshot so restoring equipment cannot undo a death. Only new games and explicit continues clear the score.
 
-`FlightLifecycle` owns damage acceptance, pause and life-transition decisions. It uses `loseCombatLife` to preserve an ongoing fight, or `loseLife` to roll back a failed objective. It returns a queued respawn, consumed once at the next simulation step after collision callbacks finish. Its three-second protection timer is authoritative; the renderer reads that timer to colour the ship. Only zero lives opens a game-over menu. The controller also owns its countdown. Continuing grants three lives and clears both current and checkpoint score; otherwise a checkpoint restart could restore pre-continue points.
+`FlightLifecycle` owns damage acceptance, pause and life-transition decisions. It uses `loseCombatLife` to preserve an ongoing fight, or `loseLife` to roll back a failed objective. It returns a queued respawn, consumed once after collision callbacks finish and any life-lost delay expires. Its three-second protection timer is authoritative; the renderer reads that timer to colour the ship. Only zero lives opens a game-over menu. The controller also owns its countdown. Continuing grants three lives and clears both current and checkpoint score; otherwise a checkpoint restart could restore pre-continue points.
+
+`DefensiveSequence` times platform departure and arrival independently of combat. `DefensiveWarpView` projects those phases and the life-lost interval into ship/platform breakup, trails and camera travel. Its fragments have no collision or reward authority. The game adapter blocks input and combat while these sequences run, then restores a protected craft. Platform colours do not affect ship faction colours.
 
 `encounterComplete` takes only objective state: remaining hostiles/flights, rescue delivery and protected-ship status. `completeEncounter` settles a completed stage and returns either recovery or gate travel. `afterGate`, `nextStage`, `resumeDestination` and `settleCourse` own the subsequent destinations and once-only payments. `ArcadeGame` displays those results; it does not duplicate their rules. These contracts can be exercised by arranging state in a unit test, without constructing a scene or advancing a whole game.
 
-`awardScoreLives` consumes score milestones stored outside the retry resources: 20,000 points in Invaders and 5,000 points in Smuggler Run. Smuggler checks at flight settlement, including crashes. Consuming milestones at the five-life cap, and never rewinding them after penalties or retries, prevents repeated awards.
+`awardScoreLives` consumes score milestones stored outside the retry resources: 35,000 points in both Defensive Position and Smuggler Run. Smuggler checks at flight settlement, including crashes. Consuming milestones at the five-life cap, and never rewinding them after penalties or retries, prevents repeated awards.
 
 Completing a stage marks `cleared` before further completion calls can award anything again. Time bonuses distinguish `null` (not paid) from `0` (paid with no time remaining). Bonus offers likewise track available, entered, settled and skipped states. These markers prevent repeated callbacks or resumed screens from paying twice.
 
@@ -100,7 +102,7 @@ In Smuggler Run the same courses are the main missions. Every finished flight re
 | Modes, displayed names and summaries | `src/modes.ts` |
 | Stage rosters, arrival schedules, bosses | `src/encounters.ts` and `src/world/actors.ts` |
 | High-wave combat pressure | `src/endless-difficulty.ts` |
-| Invader formations and attack paths | `src/invaders.ts` and `src/armada.ts` |
+| Defensive Position formations and attack paths | `src/invaders.ts` and `src/armada.ts` |
 | Smuggler delivery/life rules | `src/smuggler.ts` |
 | Course difficulty, target counts and shot penalties | `src/bonus-difficulty.ts` |
 | Asteroids, splitting and ordered targets | `src/bonus.ts` |
@@ -112,7 +114,9 @@ In Smuggler Run the same courses are the main missions. Every finished flight re
 | Weapon speed, spread, cooldown, tiers and help | `src/weapons.ts` |
 | Projectile collisions and interceptions | `src/combat/projectiles.ts` |
 | Enemy movement, warnings and faction targets | `src/combat/enemies.ts` |
-| Invaders firing turns and cooldowns | `src/combat/invader-fire.ts` |
+| Defensive Position firing turns and cooldowns | `src/combat/invader-fire.ts` |
+| Silent game-over copies of the surviving fleet and rocks | `src/rendering/defensive-aftermath.ts` |
+| Defensive Position destruction and wave warps | `src/session/defensive-sequence.ts` and `src/rendering/defensive-warp.ts` |
 | Per-bolt wave accuracy and miss penalties | `src/combat/accuracy.ts` |
 | Score-based extra lives and thresholds | `src/life-rewards.ts` |
 | Damage, life loss, pause, protection duration and countdown | `src/session/flight-lifecycle.ts` |

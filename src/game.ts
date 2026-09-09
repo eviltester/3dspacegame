@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { FlightLifecycle } from './session/flight-lifecycle';
 import { encounterComplete, pirateSalvage } from './session/encounter-outcome';
 import type { LifeDecision } from './session/flight-lifecycle';
-import { afterGate, completeEncounter, enterBonus, nextStage as advanceStage, resumeDestination, settleCourse } from './session/stage-flow';
+import { afterGate, completeEncounter, enterBonus, needsMissionBriefing, nextStage as advanceStage, resumeDestination, settleCourse } from './session/stage-flow';
 import { awardScoreLives } from './life-rewards';
 import { PlayerProtection } from './rendering/player-protection';
 import { bonusFor, clone, dock, newRun, parseProfile, pickup, purchase, recordRun, retry, rewardInterception, rewardKill, SAVE_V2, saveCheckpoint, tickChain } from './arcade';
@@ -22,11 +22,20 @@ import { crossedGate, EncounterDirector, Random, stageDefinition } from './encou
 import type { StageDefinition } from './encounters';
 import { ProjectileSystem } from './combat/projectiles';
 import { ShotAccuracy, accuracyPercent } from './combat/accuracy';
+import { actorProjectileDamage } from './combat/defensive-position';
 import { EnemySystem } from './combat/enemies';
+import { isInvaderExtra } from './combat/invader-flybys';
+import { isInvaderField, invaderFieldDuration } from './invader-events';
+import { invaderEscapeBonus, invaderKillValue } from './combat/invader-bonuses';
+import { DEFENSIVE_ARRIVAL_SECONDS, DefensiveSequence, defensiveRespawnProgress } from './session/defensive-sequence';
+import { DefensiveWarpView } from './rendering/defensive-warp';
+import { DefensiveAftermath } from './rendering/defensive-aftermath';
+import { flashDamage } from './rendering/damage-cracks';
 import { EffectsSystem, createStarfield } from './rendering/effects';
 import { HudController } from './rendering/hud';
 import { MenuViews } from './menus/views';
 import { FrontMenus } from './menus/front';
+import { isTitleTab, type TitleTab } from './menus/information-tabs';
 import { nameScore } from './scores';
 import type { MenuPreview } from './menus/views';
 import { CourseIntermission } from './session/course-intermission';
@@ -76,7 +85,7 @@ export class ArcadeGame {
   private runState: RunState | null = null;
   private selectedMode: GameMode = 'journey';
   private selectedFamily: WeaponFamily = 'pulse';
-  private controlsReturn = 'title';
+  private titleTab: TitleTab = 'game';
   private readonly levelWarpCode = new LevelWarpCode();
   private levelWarpUnlocked = false;
   private definition: StageDefinition = stageDefinition('journey', 1);
@@ -109,6 +118,7 @@ export class ArcadeGame {
     announceArrival: (actors, message) => this.announceArrival(actors, message),
     spawnShot: (...args) => this.spawnShot(...args),
     enemyShoot: (voice, distance) => this.sound.enemyShoot(voice, distance),
+    cue: cue => this.sound.cue(cue),
     lockOn: () => this.sound.cue('lockOn'),
     stopped: () => !!this.flight.menu || this.flight.pendingRespawn !== null
   });
@@ -130,6 +140,10 @@ export class ArcadeGame {
   private readonly weaponFire = new WeaponFire();
   private get shotDelay(): number { return this.weaponFire.remaining; }
   private readonly protection = new PlayerProtection();
+  private readonly defensiveSequence = new DefensiveSequence();
+  private defensiveView: DefensiveWarpView | null = null;
+  private defensiveAftermath: DefensiveAftermath | null = null;
+  private escapeBonusTime = 0;
   private recovery = 8;
   private warp = 0;
   private rescued = false;
@@ -190,6 +204,9 @@ export class ArcadeGame {
   }
   private record(run = this.run): void { if (run) recordRun(this.profile, run); this.persist(); }
   private show(screen: string, title: string, status: string, content: string, preview?: MenuPreview): void {
+    const backdrop = screen === 'gameover' && this.runState?.mode === 'invaders';
+    if (!backdrop) this.clearDefensiveAftermath();
+    document.querySelector('.game-shell')!.classList.toggle('defensive-gameover', backdrop);
     // Opening any menu releases pointer lock and held inputs before making buttons live.
     this.flight.menu = screen;
     this.levelWarpCode.reset();
@@ -197,11 +214,12 @@ export class ArcadeGame {
     this.ui.show(screen, title, status, content, preview);
     this.mobileControls.refresh();
   }
-  private showTitle(): void {
+  private showTitle(tab: TitleTab = 'game'): void {
     if (this.aftermath) this.disposeCourse();
     this.flight.paused = false;
+    this.titleTab = tab;
     this.ui.selectMode(this.selectedMode);
-    this.show(...MenuViews.title(this.profile, this.selectedMode, this.selectedFamily, this.levelWarpUnlocked));
+    this.show(...MenuViews.title(this.profile, this.selectedMode, this.selectedFamily, this.levelWarpUnlocked, tab));
     this.ui.text('arcadeBest', this.profile.records[this.selectedMode].toString().padStart(6, '0'));
   }
   private unlockLevelWarp(): void {
@@ -226,7 +244,8 @@ export class ArcadeGame {
   }
   private warpBackButton(): string { return this.runState?.practice ? button('levelWarp', 'CHOOSE LEVEL') : ''; }
   private briefing(): void {
-    this.show(...MenuViews.briefing(this.run, this.definition, this.profile.settings.controlScheme));
+    if (needsMissionBriefing(this.run.mode)) this.show(...MenuViews.briefing(this.run, this.definition, this.profile.settings.controlScheme));
+    else void this.play();
   }
   private async play(): Promise<void> {
     // Clear the menu/start-wave click before audio startup yields to another frame.
@@ -237,6 +256,8 @@ export class ArcadeGame {
       const leg = smugglerLeg(this.run.stage); this.startCourse(leg.kind, leg.difficulty);
     }
     this.flight.launch(this.run);
+    // Direct starts have no briefing frame to populate mode-specific HUD fields.
+    this.hud();
     this.ui.hide();
     this.renderer.domElement.focus({ preventScroll: true });
     this.sound.setMuted(this.profile.settings.muted);
@@ -247,7 +268,7 @@ export class ArcadeGame {
     if (!this.flight.pause(this.runState)) return;
     this.persist();
     this.show('pause', 'PAUSED', `${MODE_INFO[this.run.mode].name} / ${this.bonus ? BONUS_NAMES[this.bonus.state.kind] : this.definition.title}`, `
-      <div class="menu-actions">${button('unpause', 'RESUME', 'id="launchButton"')}${this.bonus && this.run.mode !== 'smuggler' ? button('exitBonus', 'EXIT BONUS SAFELY') : ''}${button('controls', 'CONTROLS')}${this.run.phase === 'recovery' ? button('nextWave', 'NEXT WAVE') : ''}${this.warpBackButton()}${button('title', this.run.practice ? 'TITLE SCREEN' : 'SAVE AND TITLE')}</div>
+      <div class="menu-actions">${button('unpause', 'RESUME', 'id="launchButton"')}${this.bonus && this.run.mode !== 'smuggler' ? button('exitBonus', 'EXIT BONUS SAFELY') : ''}${button('controls', 'CONTROLS')}${this.run.phase === 'recovery' && !this.defensiveSequence.active ? button('nextWave', 'NEXT WAVE') : ''}${this.warpBackButton()}${button('title', this.run.practice ? 'TITLE SCREEN' : 'SAVE AND TITLE')}</div>
       <p class="menu-description">${this.run.practice ? 'TEST FLIGHT / SAVED PROGRESS SAFE' : this.run.mode === 'smuggler' ? 'Leaving restarts this leg. Your score and lives are preserved.' : this.bonus ? 'Your main ship and lives are safe.' : 'Leaving saves the current stage checkpoint.'}</p>`);
   }
   private action(action: string): void {
@@ -262,18 +283,15 @@ export class ArcadeGame {
     }
     // Menu markup supplies data-action strings. Route commands here; menu builders
     // only describe what to display and do not mutate gameplay themselves.
-    if (action === 'controls') { this.controlsReturn = this.flight.menu === 'pause' ? 'backToPause' : 'title'; this.show(...FrontMenus.controls(this.profile, this.controlsReturn, this.selectedMode)); return; }
-    if (action === 'backToPause') { this.flight.paused = false; this.pause(); return; }
-    if (action === 'weapons') { this.show(...FrontMenus.weapons(this.profile, this.selectedFamily)); return; }
-    if (action === 'objects') { this.show(...FrontMenus.objects()); return; }
-    if (action === 'scores' || action.startsWith('scores:')) {
-      const mode = action.slice(7); if (isGameMode(mode)) this.selectedMode = mode;
-      this.show(...FrontMenus.scores(this.profile, this.selectedMode)); return;
+    if (this.flight.menu === 'title' && isTitleTab(action)) {
+      this.titleTab = action; this.ui.selectTitleTab(action); this.mobileControls.refresh(); return;
     }
-    if (action.startsWith('controls:') && this.flight.menu === 'controls') {
+    if (action === 'controls') { this.show(...FrontMenus.controls(this.profile, 'backToPause', this.run.mode)); return; }
+    if (action === 'backToPause') { this.flight.paused = false; this.pause(); return; }
+    if (action.startsWith('controls:') && (this.flight.menu === 'controls' || this.flight.menu === 'title' && this.titleTab === 'controls')) {
       const scheme = action.slice(9);
       if (isControlScheme(scheme)) {
-        this.profile.settings.controlScheme = scheme; this.input.setScheme(scheme); this.persist(); this.show(...FrontMenus.controls(this.profile, this.controlsReturn, this.selectedMode));
+        this.profile.settings.controlScheme = scheme; this.input.setScheme(scheme); this.persist(); this.refreshControls();
       }
       return;
     }
@@ -297,8 +315,8 @@ export class ArcadeGame {
         return;
       }
     }
-    if (action.startsWith('mode:')) { const mode = action.slice(5); if (isGameMode(mode)) this.selectedMode = mode; this.showTitle(); return; }
-    if (action.startsWith('startFamily:')) { const f = action.slice(12) as WeaponFamily; if (this.profile.unlocked.includes(f)) this.selectedFamily = f; if (this.flight.menu === 'weapons') this.show(...FrontMenus.weapons(this.profile, this.selectedFamily)); else this.showTitle(); return; }
+    if (action.startsWith('mode:')) { const mode = action.slice(5); if (isGameMode(mode)) this.selectedMode = mode; this.showTitle(this.titleTab); return; }
+    if (action.startsWith('startFamily:')) { const f = action.slice(12) as WeaponFamily; if (this.profile.unlocked.includes(f)) this.selectedFamily = f; this.showTitle(this.titleTab); return; }
     if (action === 'newRun') {
       this.runState = newRun(this.selectedMode, Date.now(), this.selectedFamily);
       this.loadStage(); this.persist(); this.briefing(); return;
@@ -324,8 +342,8 @@ export class ArcadeGame {
       if (this.bonus) { if (this.run.mode === 'smuggler') this.disposeCourse(); else this.finishBonus('exit'); }
       this.courseIntermission.reset(); this.showTitle(); return;
     }
-    if (action === 'assist') { this.profile.settings.aimAssist = !this.profile.settings.aimAssist; this.persist(); this.show(...FrontMenus.controls(this.profile, this.controlsReturn, this.selectedMode)); return; }
-    if (action === 'mute') { this.profile.settings.muted = !this.profile.settings.muted; this.sound.setMuted(this.profile.settings.muted); this.persist(); this.show(...FrontMenus.controls(this.profile, this.controlsReturn, this.selectedMode)); return; }
+    if (action === 'assist') { this.profile.settings.aimAssist = !this.profile.settings.aimAssist; this.persist(); this.refreshControls(); return; }
+    if (action === 'mute') { this.profile.settings.muted = !this.profile.settings.muted; this.sound.setMuted(this.profile.settings.muted); this.persist(); this.refreshControls(); return; }
     if (action === 'relaunch') {
       retry(this.run, this.run.lives === 0);
       this.loadStage(); this.persist(); void this.play(); return;
@@ -345,6 +363,10 @@ export class ArcadeGame {
     if (action === 'bonusSkip') { if (this.run.bonusStatus !== 'available') return; this.run.bonusStatus = 'skipped'; this.showShop(); return; }
     if (action === 'bonusDock') { this.showShop(); return; }
     if (action === 'exitBonus' && this.run.mode !== 'smuggler') this.finishBonus('exit');
+  }
+  private refreshControls(): void {
+    if (this.flight.menu === 'title') this.showTitle('controls');
+    else this.show(...FrontMenus.controls(this.profile, 'backToPause', this.run.mode));
   }
   private showShop(): void {
     const credits = this.run.pilot.credits;
@@ -430,8 +452,18 @@ export class ArcadeGame {
     this.show('bonusResult', result.medal, `${reasonText} / MAIN SHIP SAFE`, `<p class="result-score">+${result.score} POINTS</p>${scoreSummary}<p>+${result.credits} CREDITS${result.extraLife ? ' / EXTRA LIFE' : ''}</p><div class="menu-actions">${button('bonusDock', 'CONTINUE TO DOCK', 'id="launchButton"')}${this.warpBackButton()}</div>`);
   }
   private showGameOver(): void {
+    if (this.run.mode === 'invaders' && !this.defensiveAftermath) {
+      this.defensiveAftermath = new DefensiveAftermath(this.actors, this.run.stage, this.run.elapsed);
+      this.scene.add(this.defensiveAftermath.root); this.world.visible = false;
+      configureArmadaCamera(this.camera);
+    }
     this.flight.showGameOver();
     this.show(...MenuViews.gameOver(this.run, this.profile));
+  }
+  private clearDefensiveAftermath(): void {
+    if (!this.defensiveAftermath) return;
+    this.defensiveAftermath.dispose(); this.defensiveAftermath = null; this.world.visible = true;
+    document.querySelector('.game-shell')!.classList.remove('defensive-gameover');
   }
   private fail(message: string, restart = false): void {
     const decision = this.flight.fail(this.run, restart ? 'checkpoint' : 'combat');
@@ -442,7 +474,11 @@ export class ArcadeGame {
     if (decision.type === 'ignored') return;
     if (decision.record) this.record(decision.record); else this.persist();
     if (decision.type === 'gameover') { this.protection.clear(); this.sound.gameOver(); this.showGameOver(); }
-    else { if (this.run.mode === 'smuggler') this.input.clear(); this.sound.explosion(0); }
+    else {
+      if (this.run.mode === 'smuggler' || this.run.mode === 'invaders') this.input.clear();
+      if (this.defensiveView) { this.protection.clear(); this.defensiveView.destroyCraft(); this.feedbackTime = 0; }
+      this.sound.explosion(0);
+    }
   }
   private respawn(): void {
     const kind = this.flight.consumeRespawn(this.run);
@@ -454,6 +490,8 @@ export class ArcadeGame {
     this.position.set(0, 0, 0); this.previousPosition.copy(this.position); this.orientation.identity();
     this.projectiles.clearHostileFire(this.position);
     this.protection.start(this.armadaRig?.craft, this.flight.protection);
+    this.defensiveView?.finish();
+    if (this.run.mode === 'invaders') { this.input.clearFlight(); this.weaponFire.reset(); }
     this.bonus?.protect(this.flight.protection);
     this.feedbackTime = 0;
     this.log(`${this.run.lives} LIVES LEFT / RESPAWN SHIELD`);
@@ -465,6 +503,16 @@ export class ArcadeGame {
     if (gained) { this.log(`EXTRA LIFE +${gained}! / ${this.run.lives} LIVES`); this.sound.cue('extraLife'); }
   }
   private nextStage(autoPlay = false): void {
+    if (this.run.mode === 'invaders' && this.run.cleared) {
+      if (this.defensiveSequence.start('departing')) {
+        this.input.clear(); this.defensiveView?.depart(); this.sound.warp();
+        if (this.flight.menu) void this.play();
+      }
+      return;
+    }
+    this.advanceLevel(autoPlay);
+  }
+  private advanceLevel(autoPlay = false): void {
     const result = advanceStage(this.run, !!this.bonus);
     if (!result) return;
     this.record();
@@ -487,6 +535,7 @@ export class ArcadeGame {
     // is paused. Clamp long gaps so returning to the browser cannot fast-forward a run.
     this.stats.frames += 1; this.stats.frameMs += real * 1000;
     this.ui.tick(real);
+    if (this.defensiveAftermath && !document.hidden) this.defensiveAftermath.tick(real);
     if (this.flight.canStep(this.runState)) {
       this.accumulator += real;
       // A slow display frame may need multiple simulation ticks; a fast one may
@@ -502,7 +551,13 @@ export class ArcadeGame {
     if (this.runState && !this.bonus && !this.aftermath) this.updateCamera();
   }
   private updateCamera(): void {
+    if (this.defensiveAftermath) { configureArmadaCamera(this.camera); return; }
     if (this.tunnel) { this.tunnel.view.configureCamera(this.camera); return; }
+    if (this.defensiveView && this.defensiveSequence.active) {
+      if (this.defensiveSequence.phase === 'departing') this.defensiveView.showDeparture(this.defensiveSequence.progress, this.camera);
+      else this.defensiveView.showArrival(this.defensiveSequence.progress, this.camera);
+      return;
+    }
     this.camera.fov = 68; this.camera.updateProjectionMatrix();
     const locked = this.definition.kind === 'armada' && (!this.run.cleared || this.run.mode === 'invaders');
     if (this.armadaRig) {
@@ -514,6 +569,8 @@ export class ArcadeGame {
   }
 
   private loadStage(protectedTime = 0): void {
+    this.clearDefensiveAftermath();
+    this.defensiveView?.dispose(); this.defensiveView = null; this.defensiveSequence.reset(); this.escapeBonusTime = 0;
     if (this.tunnel) { this.scene.remove(this.tunnel.view.root); this.tunnel.dispose(); this.tunnel = null; }
     // Rebuild only transient world state from the run's seed/stage. Resource rollback
     // belongs to retry(), so loading a paid shop cannot erase its purchases.
@@ -537,7 +594,7 @@ export class ArcadeGame {
     this.input.throttle = this.definition.kind === 'armada' ? 0 : 65;
     this.warp = 0; this.worldInteractions.reset();
     this.weaponFire.reset(); this.rescued = false; this.objectiveShip = null; this.objectivePod = null;
-    this.flight.paused = false; this.recovery = this.definition.difficulty.recovery; this.run.elapsed = 0;
+    this.flight.paused = false; this.recovery = this.run.mode === 'invaders' ? 2 : this.definition.difficulty.recovery; this.run.elapsed = 0;
     this.stats = { shots: 0, enemyShots: 0, kills: 0, interceptions: 0, npcHits: 0, pickups: 0, firstCombat: -1, firstUpgrade: -1, frames: 0, frameMs: 0 };
     if (this.run.mode === 'tunnels') {
       this.base = null; this.gate = null; this.world.visible = false; this.input.autoFlight = true;
@@ -552,9 +609,13 @@ export class ArcadeGame {
     const level = this.actorWorld.createLevel(this.run, this.definition);
     this.base = level.base; this.gate = level.gate; this.objectiveShip = level.objectiveShip;
     this.objectivePod = level.objectivePod; this.armadaRig = level.armadaRig;
+    if (this.run.mode === 'invaders' && this.armadaRig) {
+      this.defensiveView = new DefensiveWarpView(this.world, this.armadaRig, this.run.stage, position => this.sound.shatter(position.distanceTo(this.position)));
+      if (!this.run.cleared) { this.defensiveSequence.start('arriving'); this.protection.start(this.armadaRig.craft); }
+    }
     if (this.run.cleared) { this.director.drain(); if (this.run.phase !== 'recovery') this.activateGate(); }
     this.updateCamera();
-    this.log(this.run.mode === 'invaders' ? 'HOLD THE DEFENSIVE LANE - BREAK THE ALIEN FORMATION' : this.definition.kind === 'armada' ? this.run.cleared ? 'TRACTOR BEAM RELEASED' : 'TRACTOR BEAM LOCKED - DESTROY THE ARMADA TO ESCAPE' : this.definition.title);
+    this.log(this.run.mode === 'invaders' ? isInvaderField(this.run.stage) ? 'ASTEROID FIELD - SURVIVE THE COUNTDOWN' : 'HOLD THE DEFENSIVE LANE - BREAK THE ALIEN FORMATION' : this.definition.kind === 'armada' ? this.run.cleared ? 'TRACTOR BEAM RELEASED' : 'TRACTOR BEAM LOCKED - DESTROY THE ARMADA TO ESCAPE' : this.definition.title);
   }
   private addActor(...args: Parameters<ActorWorld['add']>): Actor { return this.actorWorld.add(...args); }
   private spawnCargo(drop: CargoDrop, position: THREE.Vector3, essential = false): Actor {
@@ -585,11 +646,40 @@ export class ArcadeGame {
     }
     // Consume input once per tick, then hand it to exactly one movement system:
     // a course controller, the armada lane, or unrestricted local-axis flight.
+    const previousRespawnDelay = this.flight.respawnDelay;
     this.flight.tick(this.run, dt);
     if (this.flight.pendingRespawn) {
       if (this.run.mode === 'smuggler') this.input.clear();
-      if (this.flight.respawnDelay > 0) { this.aftermath?.animateAfterDeath(dt, this.camera); return; }
+      if (this.run.mode === 'invaders') this.input.clearFlight();
+      if (this.flight.respawnDelay > 0) {
+        this.aftermath?.animateAfterDeath(dt, this.camera);
+        if (this.defensiveView) {
+          this.defensiveView.update(dt); this.updateEffects(dt); this.stars.rotation.y += dt * 0.03;
+          if (this.flight.respawnDelay <= DEFENSIVE_ARRIVAL_SECONDS) {
+            if (previousRespawnDelay > DEFENSIVE_ARRIVAL_SECONDS) { this.sound.warp(); this.protection.start(this.armadaRig!.craft); }
+            this.protection.update(dt);
+            this.defensiveView.showArrival(defensiveRespawnProgress(this.flight.respawnDelay), this.camera);
+          }
+        }
+        return;
+      }
       this.respawn();
+    }
+    if (this.defensiveSequence.active) {
+      this.input.clearFlight();
+      if (this.defensiveSequence.phase === 'arriving' && this.defensiveSequence.progress === 0) this.sound.warp();
+      const phase = this.defensiveSequence.phase, event = this.defensiveSequence.tick(dt);
+      if (phase === 'departing') {
+        if (this.defensiveView!.showDeparture(this.defensiveSequence.progress, this.camera)) this.sound.explosion(0);
+      } else this.defensiveView!.showArrival(this.defensiveSequence.progress, this.camera);
+      this.defensiveView!.update(dt); this.updateEffects(dt); this.protection.update(dt);
+      this.escapeBonusTime = Math.max(0, this.escapeBonusTime - dt);
+      if (event === 'advance') this.advanceLevel(true);
+      if (event === 'ready') {
+        this.defensiveView!.finish(); this.flight.protection = 3; this.flight.grace = 0;
+        this.protection.start(this.armadaRig!.craft); this.updateCamera();
+      }
+      return;
     }
     this.protection.display(this.flight.protection);
     const run = this.run;
@@ -602,6 +692,7 @@ export class ArcadeGame {
     this.weaponFire.tick(dt);
     this.feedbackTime = Math.max(0, this.feedbackTime - dt); this.hitTime = Math.max(0, this.hitTime - dt);
     this.popupTime = Math.max(0, this.popupTime - dt);
+    this.escapeBonusTime = Math.max(0, this.escapeBonusTime - dt);
     this.arrivalTime = Math.max(0, this.arrivalTime - dt);
     for (const message of this.messages) message.ttl -= dt;
     this.messages = this.messages.filter(message => message.ttl > 0);
@@ -630,8 +721,7 @@ export class ArcadeGame {
       if (this.bonus.state.health < health || this.bonus.state.shield < shield || this.bonus.state.damage > damage) {
         this.sound.damage(); this.feedbackTime = 1.2;
         this.ui.text('hitCallout', this.bonus.state.health < health ? 'SKIFF POINT LOST' : this.bonus.state.damage > damage ? `SKIFF DAMAGE ${this.bonus.state.damage}/100` : this.bonus.state.shield === 0 ? 'SHIELDS DOWN' : 'SHIELD HIT');
-        const layer = document.querySelector<HTMLElement>('#damageLayer')!;
-        layer.classList.remove('active'); void layer.offsetWidth; layer.classList.add('active');
+        flashDamage(document.querySelector<HTMLElement>('#damageLayer'));
       }
       if (this.bonus.state.finished) this.finishBonus(this.bonus.state.reason!);
       return;
@@ -663,8 +753,10 @@ export class ArcadeGame {
       this.updateLaw(dt);
       this.updateObjective(dt);
       if (this.flight.menu || this.flight.pendingRespawn) return;
-      if (encounterComplete({ kind: this.definition.kind, flightsFinished: this.director.finished,
-        hostiles: this.hostiles().length, rescued: this.rescued, protectedShip: this.objectiveShip })) this.completeStage();
+      const complete = run.mode === 'invaders' && isInvaderField(run.stage) ? run.elapsed >= invaderFieldDuration(run.stage)
+        : encounterComplete({ kind: this.definition.kind, flightsFinished: this.director.finished,
+          hostiles: this.hostiles().filter(actor => run.mode !== 'invaders' || !isInvaderExtra(actor)).length, rescued: this.rescued, protectedShip: this.objectiveShip });
+      if (complete) this.completeStage();
     } else if (run.phase === 'cleared') {
       this.updateCargo(dt);
       if (this.gate && crossedGate(this.previousPosition, this.position, this.gate.object.position, this.gate.object.quaternion)) this.startWarp();
@@ -693,10 +785,12 @@ export class ArcadeGame {
     if (this.run.mode === 'invaders') this.log(`WAVE ${this.run.stage} ACCURACY ${accuracyPercent(this.run.accuracy)}%: ${this.run.accuracy.hits} HITS / ${this.run.accuracy.misses} MISSES`);
     if (result.extraLives) { this.log(`EXTRA LIFE +${result.extraLives}! / ${this.run.lives} LIVES`); this.sound.cue('extraLife'); }
     this.arrivalTime = 0;
+    this.feedbackTime = 0;
     this.input.clear();
     this.sound.complete(); this.log('MISSION COMPLETE!');
     this.projectiles.clear();
-    if (result.route === 'recovery') { this.recovery = this.definition.difficulty.recovery; this.log('WAVE CLEAR: CLICK TO START THE NEXT WAVE');
+    if (this.run.mode === 'invaders') for (const actor of [...this.actors]) if (isInvaderExtra(actor)) this.removeActor(actor);
+    if (result.route === 'recovery') { this.recovery = this.run.mode === 'invaders' ? 2 : this.definition.difficulty.recovery; this.log(this.run.mode === 'invaders' ? 'WAVE CLEAR - PREPARING WARP' : 'WAVE CLEAR: CLICK TO START THE NEXT WAVE');
     } else { this.activateGate(); this.log('Head to the Warp Gate!'); }
     if (this.definition.kind === 'armada' && this.run.mode !== 'invaders') {
       this.log('TRACTOR BEAM RELEASED - FREE FLIGHT RESTORED');
@@ -740,12 +834,12 @@ export class ArcadeGame {
   private updateActors(dt: number): void {
     this.threat = this.enemies.update(dt, {
       run: this.run, definition: this.definition, actors: () => this.actors, position: this.position,
-      previousPosition: this.previousPosition, orientation: this.orientation, objectiveShip: this.objectiveShip
+      previousPosition: this.previousPosition, orientation: this.orientation, objectiveShip: this.objectiveShip, flightsFinished: this.director.finished
     });
   }
   private switchWeapon(command: WeaponCommand): void {
     // Do not reset shotDelay here: switching families must not bypass fire-rate limits.
-    if (!this.runState || !this.input.active || this.flight.paused || this.flight.menu || this.flight.pendingRespawn || this.warp > 0) return;
+    if (!this.runState || !this.input.active || this.flight.paused || this.flight.menu || this.flight.pendingRespawn || this.defensiveSequence.active || this.warp > 0) return;
     if (this.tunnel && (this.tunnel.simulation.state.respawn > 0 || this.tunnel.simulation.state.phase !== 'assault')) return;
     const current = this.bonus?.state.family ?? this.run.family;
     const family = selectWeapon(current, command);
@@ -761,11 +855,10 @@ export class ArcadeGame {
     const spec = weaponSpec(this.run.family, this.run.tiers[this.run.family], this.run.mode);
     const direction = assistedAim(this.position, this.forward(), this.actors,
       this.profile.settings.aimAssist && this.definition.kind !== 'armada');
-    const aliens = this.run.mode === 'invaders' ? this.hostiles().length : 0;
     const fired = this.weaponFire.fire(spec, index => {
       const aim = direction.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0).applyQuaternion(this.orientation), (index - (spec.count - 1) / 2) * spec.spread);
       if (this.spawnShot('player', -1, 0, this.position.clone().addScaledVector(aim, 9), aim, spec.speed, spec.damage, spec.color, spec.radius, spec.length, spec.pierce)) {
-        if (this.run.mode === 'invaders') this.accuracy.begin(this.shots.at(-1)!.id, this.run.accuracy, aliens);
+        if (this.run.mode === 'invaders') this.accuracy.begin(this.shots.at(-1)!.id, this.run.accuracy, this.run.family);
         return true;
       }
       return false;
@@ -786,8 +879,8 @@ export class ArcadeGame {
   }
   private updateShots(dt: number): void {
     this.projectiles.update(dt, this.actors, this.previousPosition, this.position, {
-      damageActor: (actor, damage, byPlayer) => this.damageActor(actor, damage, byPlayer),
-      damagePlayer: (damage, message) => this.damagePlayer(damage, this.run.mode === 'invaders' ? 'ALIEN FIRE - RETURN FIRE!' : message),
+      damageActor: (actor, damage, byPlayer, family) => this.damageActor(actor, actorProjectileDamage(this.run.mode, actor.kind, family, damage), byPlayer),
+      damagePlayer: (damage, message) => this.damagePlayer(damage, this.run.mode === 'invaders' && message.startsWith('RED PIRATE') ? 'ALIEN FIRE - RETURN FIRE!' : message),
       intercepted: position => {
         rewardInterception(this.run); this.stats.interceptions++;
         this.checkScoreLives();
@@ -805,7 +898,7 @@ export class ArcadeGame {
       stopped: () => !!this.flight.menu || this.flight.pendingRespawn !== null
     });
   }
-  private damageActor(actor: Actor, damage: number, byPlayer: boolean): void {
+  private damageActor(actor: Actor, damage: number, byPlayer: boolean, fragments = true): void {
     if (actor.dead) return;
     if (actor.kind === 'pirate' && actor.essential && actor.role === 'carrier' && this.actors.some(item => !item.dead && item.parent === actor.id)) {
       if (byPlayer) this.log('CORE SHIELDED: DESTROY THE OUTER SYSTEMS');
@@ -826,25 +919,32 @@ export class ArcadeGame {
       this.hitTime = 0.12;
       if (this.stats.firstCombat < 0) this.stats.firstCombat = this.run.elapsed;
     }
-    if (actor.hull <= 0) this.destroy(actor, byPlayer);
+    if (actor.hull <= 0) this.destroy(actor, byPlayer, fragments);
   }
-  private destroy(actor: Actor, byPlayer: boolean): void {
+  private destroy(actor: Actor, byPlayer: boolean, fragments = true): void {
     // Enemy removal advances the objective regardless of who killed it. Only the
     // player's kills earn chain points; allied police can still help clear a stage.
     if (actor.dead) return;
+    if (actor.kind === 'asteroid' && byPlayer && fragments) this.enemies.splitAsteroid(actor, this.actors);
     // Detach cosmetic hull panels before ActorWorld disposes the ship. Rewards,
     // cargo and objective removal still happen now, not when debris finishes.
     if (['pirate', 'police', 'trader', 'part'].includes(actor.kind)) this.effects.explodeShip(actor);
     this.spark(actor.object.position, actor.faction === 'pirate' ? 0xff5863 : 0x8affb0, 14);
     this.sound.explosion(actor.object.position.distanceTo(this.position));
     if (actor.kind === 'part') this.log('OUTER SYSTEM DESTROYED');
-    if (actor.faction === 'pirate') {
+    if (actor.faction === 'pirate' || this.run.mode === 'invaders' && actor.flyby?.kind === 'police') {
       if (byPlayer) {
-        const score = rewardKill(this.run, actor.kind === 'part' ? 150 : actor.kind === 'mine' ? 25 : actor.role === 'carrier' ? 500 : 100);
+        const score = rewardKill(this.run, this.run.mode === 'invaders' ? invaderKillValue(actor, this.run.elapsed) : actor.kind === 'part' ? 150 : actor.kind === 'mine' ? 25 : actor.role === 'carrier' ? 500 : 100);
+        if (this.run.mode === 'invaders' && actor.flyby) this.effects.flybyScore(actor.object.position, score);
+        const escapeBonus = this.run.mode === 'invaders' ? invaderEscapeBonus(actor) : 0;
+        if (escapeBonus) {
+          this.run.pilot.score += escapeBonus; this.escapeBonusTime = 2.5;
+          this.log('LAST ALIEN +500 BONUS'); this.sound.cue('bonusPayment');
+        }
         this.checkScoreLives();
         this.ui.text('scorePopup', `+${score}`); this.popupTime = 0.7; this.stats.kills += 1;
       }
-      if (actor.kind === 'pirate') {
+      if (actor.kind === 'pirate' || actor.kind === 'asteroid' && byPlayer || actor.flyby?.kind === 'police') {
         const salvage = pirateSalvage(this.run, types => this.rng.pick(types));
         const location = salvage.essential && this.definition.kind !== 'armada' ? this.position.clone().addScaledVector(this.forward(), 15) : actor.object.position.clone();
         this.spawnCargo(salvage.drop, location, salvage.essential);
@@ -855,16 +955,16 @@ export class ArcadeGame {
     if (actor === this.objectiveShip) this.fail(this.definition.kind === 'escort' ? 'CONVOY LOST' : 'STATION LOST', true);
   }
   private damagePlayer(damage: number, message: string): void {
+    if (this.defensiveSequence.active) return;
     const decision = this.flight.damage(this.run, damage);
     if (decision.type === 'ignored') return;
     this.log(message); this.sound.damage(); this.feedbackTime = 1.6;
     this.ui.text('hitCallout', message);
-    const layer = document.querySelector('#damageLayer')!;
-    layer.classList.remove('active'); void (layer as HTMLElement).offsetWidth; layer.classList.add('active');
+    flashDamage(document.querySelector<HTMLElement>('#damageLayer'));
     if (decision.type !== 'hit') { this.log('SHIP LOST'); this.handleLifeDecision(decision); }
   }
   private special(): void {
-    if (!this.runState || this.flight.paused || this.flight.menu || this.flight.pendingRespawn) return;
+    if (!this.runState || this.flight.paused || this.flight.menu || this.flight.pendingRespawn || this.defensiveSequence.active) return;
     if (this.tunnel) { this.tunnel.blast(); return; }
     if (this.bonus) {
       const points = this.bonus.state.points;
@@ -879,7 +979,7 @@ export class ArcadeGame {
     if (this.run.mode === 'invaders' && this.run.blastUsed) { this.log('BLAST USED - AVAILABLE NEXT WAVE'); return; }
     if (this.run.charge < 100) { this.log(`BLAST CHARGING ${this.run.charge}%`); return; }
     if (!defensiveBlast(this.run, this.actors, this.position, () => this.projectiles.clearHostileFire(this.position),
-      (actor, amount) => this.damageActor(actor, amount, true))) return;
+      (actor, amount) => this.damageActor(actor, amount, true, false))) return;
     if (this.run.mode === 'invaders') this.persist();
     this.effects.blast(this.position, this.orientation);
     this.sound.blast(); this.log('DEFENSIVE BLAST');
@@ -902,7 +1002,8 @@ export class ArcadeGame {
     this.hudController.update({
       menu: this.flight.menu, profile: this.profile, selectedMode: this.selectedMode, run: this.runState,
       bonus: this.bonus, definition: this.definition, actors: this.actors, throttle: this.input.throttle,
-      recovery: this.recovery, intermission: this.courseIntermission.remaining, respawnDelay: this.flight.respawnDelay, arrivalTime: this.arrivalTime, rescued: this.rescued,
+      recovery: this.recovery, intermission: this.courseIntermission.remaining, respawnDelay: this.flight.respawnDelay, defensiveSequence: this.defensiveSequence.phase,
+      escapeBonusTime: this.escapeBonusTime, arrivalTime: this.arrivalTime, arrivalMessage: this.arrivalMessage, rescued: this.rescued,
       objectiveShip: this.objectiveShip, director: this.director, position: this.bonus ? this.camera.position : this.position,
       orientation: this.bonus ? this.camera.quaternion : this.orientation, messages: this.messages, feedbackTime: this.feedbackTime,
       hitTime: this.hitTime, popupTime: this.popupTime, gate: this.gate, base: this.base,
@@ -922,6 +1023,7 @@ export class ArcadeGame {
         nextLifeScore: this.runState?.nextLifeScore, stageReward: this.runState?.stageReward,
         accuracy: this.runState ? { ...this.runState.accuracy } : undefined,
         respawn: { pending: this.flight.pendingRespawn, protection: this.flight.protection, delay: this.flight.respawnDelay },
+        defensiveSequence: this.defensiveSequence.phase, defensiveDestruction: this.defensiveView?.destruction,
         shield: this.runState?.pilot.shield, hull: this.runState?.pilot.hull, weapon: this.runState?.family, tiers: this.runState?.tiers,
         charge: this.runState?.charge, wanted: this.runState?.pilot.wanted.active, hostileCount: this.hostiles().length,
         attackerCount: this.actors.filter(actor => actor.windup >= 0).length, speedScale: this.definition.speedScale,

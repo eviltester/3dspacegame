@@ -15,6 +15,13 @@ export function createInvaderModel(role: EnemyArchetype): THREE.Group {
   return group;
 }
 
+export function createInvaderFlybyModel(kind: 'police' | 'pirate' | 'courier'): THREE.Group {
+  const ship = kind === 'police' ? createPoliceModel() : kind === 'courier' ? createTraderHaulerModel() : createEnemyModel('carrier');
+  if (kind === 'police') ship.scale.setScalar(1.6);
+  if (kind === 'courier') ship.traverse(child => { if (child instanceof THREE.LineSegments) (child.material as THREE.LineBasicMaterial).color.setHex(0xffdf60); });
+  return ship;
+}
+
 export function createEnemyModel(role: EnemyArchetype): THREE.Group {
   if (role === 'raider') return createPirateModel();
   const group = new THREE.Group();
@@ -50,16 +57,17 @@ export function createPirateModel(): THREE.Group {
   return group;
 }
 
-export function createArmadaRig(): { root: THREE.Group; craft: THREE.Group } {
+export function createArmadaRig(): { root: THREE.Group; craft: THREE.Group; platform: THREE.Group } {
   const root = new THREE.Group();
-  root.add(lineShape([[-86, -5, -18], [86, -5, -18], [-86, -5, 18], [86, -5, 18],
+  const platform = new THREE.Group(); platform.name = 'defensive-platform';
+  platform.add(lineShape([[-86, -5, -18], [86, -5, -18], [-86, -5, 18], [86, -5, 18],
     [-86, 12, 0], [-86, -12, 0], [86, 12, 0], [86, -12, 0]],
   [[0, 1], [2, 3], [0, 2], [1, 3], [4, 5], [6, 7]], 0x75caff, 0.6));
   const craft = new THREE.Group();
   craft.add(lineShape([[0, 0, -12], [-8, 0, 7], [-3, 0, 4], [0, 3, 2], [3, 0, 4], [8, 0, 7], [0, -2, 6]],
     [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 0], [0, 3], [2, 6], [4, 6]], 0xedffff));
-  root.add(craft);
-  return { root, craft };
+  root.add(platform, craft);
+  return { root, craft, platform };
 }
 
 export function createTraderHaulerModel(): THREE.Group {

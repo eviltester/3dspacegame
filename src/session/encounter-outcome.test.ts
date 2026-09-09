@@ -61,7 +61,7 @@ describe('guaranteed and seeded salvage', () => {
     const a = new Random(17), b = new Random(17);
     for (let i = 0; i < 20; i++) expect(pirateSalvage(run, types => a.pick(types))).toEqual(pirateSalvage(run, types => b.pick(types)));
   });
-  it.each([1, 4, 5, 15, 60])('Invaders kill %i has exactly one repair slot in fifteen, without guaranteed repair kills', kills => {
+  it.each([1, 4, 5, 15, 60])('Defensive Position kill %i has exactly one repair slot in fifteen, without guaranteed repair kills', kills => {
     const run = newRun('invaders', 1); run.earlyCore = true; run.kills = kills;
     // Enumerate every equally likely draw instead of relying on a random sample.
     const drops = Array.from({ length: 15 }, (_, index) => pirateSalvage(run, types => {
@@ -72,7 +72,7 @@ describe('guaranteed and seeded salvage', () => {
     expect(drops.filter(reward => reward.drop.type === 'weaponCore')).toHaveLength(7);
     expect(drops.every(reward => reward.drop.amount === 1 && !reward.essential)).toBe(true);
   });
-  it('Invaders still guarantees its opening core before rolling ordinary salvage', () => {
+  it('Defensive Position still guarantees its opening core before rolling ordinary salvage', () => {
     const run = newRun('invaders', 1), pick = vi.fn(() => 'shieldCell' as const);
     expect(pirateSalvage(run, pick)).toEqual({ drop: { type: 'weaponCore', amount: 1 }, essential: true });
     expect(pick).not.toHaveBeenCalled();

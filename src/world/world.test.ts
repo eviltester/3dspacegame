@@ -4,6 +4,8 @@ import { newRun } from '../arcade';
 import { Random, stageDefinition } from '../encounters';
 import { ActorWorld } from './actors';
 import { WorldInteractions } from './interactions';
+import { invaderDistance, INVADER_CLEARANCE } from '../invader-formation';
+import { invaderFighterShots, invaderSpreadLimit } from '../invaders';
 
 vi.mock('../models', async original => ({ ...await original<typeof import('../models')>(), createGateModel: () => new THREE.Group() }));
 
@@ -54,6 +56,28 @@ it('collects magnet salvage once, including an actual weapon improvement', () =>
   interactions.collect(0.1, frame); interactions.collect(0.1, frame);
   expect(core.dead).toBe(true); expect(run.tiers.pulse).toBe(2); expect(events.collected).toHaveBeenCalledExactlyOnceWith(core.drop, true);
 });
+
+it('assigns unique invader slots across partial reinforcement packs and reuses only vacated slots', () => {
+  const world = new THREE.Group(); let id = 1;
+  const actors = new ActorWorld(world, () => id++), run = newRun('invaders', 12);
+  const frame = { run, definition: stageDefinition('invaders', 12), position: new THREE.Vector3(), orientation: new THREE.Quaternion(), rng: new Random(7) };
+  for (let group = 0; group < 6; group++) actors.spawnPack(['raider', 'flanker', 'diver'], frame);
+  expect(actors.actors).toHaveLength(18);
+  expect(new Set(actors.actors.map(actor => actor.formationSlot)).size).toBe(18);
+  const survivors = actors.actors.filter(actor => actor.formationSlot! % 3 !== 0);
+  for (const actor of [...actors.actors]) if (!survivors.includes(actor)) actors.remove(actor);
+  const before = survivors.map(actor => ({ slot: actor.formationSlot, position: actor.object.position.clone() }));
+  for (let group = 0; group < 2; group++) actors.spawnPack(['diver', 'raider', 'flanker'], frame);
+  expect(actors.actors).toHaveLength(18);
+  expect(new Set(actors.actors.map(actor => actor.formationSlot)).size).toBe(18);
+  expect(survivors.map(actor => ({ slot: actor.formationSlot, position: actor.object.position }))).toEqual(before);
+  for (let i = 0; i < 18; i++) for (let j = i + 1; j < 18; j++) {
+    expect(invaderDistance(actors.actors[i].object.position, actors.actors[j].object.position)).toBeGreaterThanOrEqual(INVADER_CLEARANCE);
+  }
+  expect(actors.spawnPack(['raider'], frame)).toHaveLength(0);
+  expect(actors.actors).toHaveLength(18);
+  actors.clear();
+});
 it('requires deliberate contraband contact, while armada salvage moves toward the lane', () => {
   const { actors, interactions, frame } = fixture(3);
   const illegal = actors.cargo({ type: 'contraband', amount: 1 }, new THREE.Vector3(15, 0, 0));
@@ -61,6 +85,25 @@ it('requires deliberate contraband contact, while armada salvage moves toward th
   interactions.collect(0.1, frame); expect(illegal.object.position.x).toBe(15); expect(illegal.dead).toBe(false);
   expect(drifting.object.position.z).toBeGreaterThan(-80);
   frame.position.x = 15; interactions.collect(0.1, frame); expect(illegal.dead).toBe(true);
+});
+
+it.each([13, 19, 25, 43, 1000])('wave %i reinforcement packs share one spread budget across the live formation', wave => {
+  let id = 0;
+  const actors = new ActorWorld(new THREE.Group(), () => ++id), run = newRun('invaders', 12); run.stage = wave;
+  const definition = stageDefinition('invaders', wave);
+  const frame = { run, definition, position: new THREE.Vector3(), orientation: new THREE.Quaternion(), rng: new Random(7) };
+  const spreaders = () => actors.actors.filter(actor => invaderFighterShots(wave, actor.formationSlot!) === 3);
+  for (const pack of definition.waves) {
+    actors.spawnPack(pack.enemies, frame);
+    expect(spreaders().length).toBeLessThanOrEqual(invaderSpreadLimit(wave));
+  }
+  expect(actors.actors).toHaveLength(18); expect(spreaders()).toHaveLength(invaderSpreadLimit(wave));
+  const removed = spreaders()[0]; actors.remove(removed);
+  expect(spreaders()).toHaveLength(invaderSpreadLimit(wave) - 1);
+  const [replacement] = actors.spawnPack(['diver', 'raider', 'flanker'], frame);
+  expect(replacement.formationSlot).toBe(removed.formationSlot);
+  expect(spreaders()).toHaveLength(invaderSpreadLimit(wave)); expect(actors.actors).toHaveLength(18);
+  actors.clear();
 });
 it('trades and delivers rescue cargo once at the station', () => {
   const { interactions, frame, run, events } = fixture(2);

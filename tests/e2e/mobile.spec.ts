@@ -6,11 +6,11 @@ test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 }
 // Tilt maths, permission outcomes and gesture timing are tested directly in src/mobile.
 test('touch launch, native pointer capture and portrait/landscape flight controls', async ({ game, page }) => {
   await game.open();
-  await page.getByRole('button', { name: 'CONTROLS', exact: true }).tap();
+  await page.getByRole('tab', { name: 'CONTROLS', exact: true }).tap();
   await expect(page.getByRole('button', { name: 'TOUCH / TILT', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await game.layout();
   await page.screenshot({ path: game.info.outputPath('touch-controls.png'), fullPage: true });
-  await page.locator('[data-action="title"]').tap();
+  await page.getByRole('tab', { name: 'GAME', exact: true }).tap();
   await page.locator('[data-action="newRun"]').tap();
   await page.locator('[data-action="launch"]').tap(); await page.clock.runFor(80);
   await expect(page.locator('#launchOverlay')).toBeHidden();
@@ -45,7 +45,7 @@ test('touch launch, native pointer capture and portrait/landscape flight control
   await page.getByRole('button', { name: 'Pause', exact: true }).tap();
   await page.locator('[data-action="title"]').tap();
   await page.locator('[data-action="mode:smuggler"]').tap();
-  await page.locator('[data-action="newRun"]').tap(); await page.locator('[data-action="launch"]').tap();
+  await page.locator('[data-action="newRun"]').tap();
   await page.clock.runFor(50);
   // Native touch capture on the hold button must survive a long press and release.
   const boost = page.getByRole('button', { name: 'Boost', exact: true });

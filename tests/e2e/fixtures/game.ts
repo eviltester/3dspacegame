@@ -46,7 +46,7 @@ export class GameDriver {
     await this.renderFrame();
   }
   async action(name: string): Promise<void> {
-    const button = this.page.locator(`#screenContent [data-action="${name}"]`);
+    const button = this.page.locator(`#launchOverlay [data-action="${name}"]`);
     await button.click();
     await this.renderFrame();
   }
@@ -58,7 +58,10 @@ export class GameDriver {
     await expect.poll(async () => (await this.state()).menu).toBe('');
   }
   async start(mode: GameMode = 'journey'): Promise<void> {
-    await this.action(`mode:${mode}`); await this.action('newRun'); await this.engage();
+    await this.action(`mode:${mode}`);
+    if (mode === 'journey' || mode === 'endless') { await this.action('newRun'); await this.engage(); }
+    else await this.engage('newRun');
+    if (mode === 'invaders') await this.step(1.2);
   }
   async pause(): Promise<void> {
     await this.page.mouse.down({ button: 'middle' });
@@ -88,7 +91,7 @@ export class GameDriver {
   async gate(): Promise<void> {
     await this.page.evaluate(() => window.vectorShooterDebug.reachGate()); await this.step(2.2);
   }
-  async screenshot(name: string, selector = '#viewport canvas'): Promise<Buffer> {
+  async screenshot(name: string, selector = '#viewport canvas', minimumLitPixels = 300): Promise<Buffer> {
     // Assert visible canvas pixels rather than a brittle exact screenshot match.
     // Individual rendering tests compare frames to also check motion/transparency.
     await this.renderFrame();
@@ -97,7 +100,7 @@ export class GameDriver {
     const png = PNG.sync.read(buffer);
     let lit = 0;
     for (let i = 0; i < png.data.length; i += 4) if (Math.max(png.data[i], png.data[i + 1], png.data[i + 2]) > 60) lit++;
-    expect(lit, `${name} must render visible pixels`).toBeGreaterThan(300);
+    expect(lit, `${name} must render visible pixels`).toBeGreaterThan(minimumLitPixels);
     return buffer;
   }
   async layout(): Promise<void> {

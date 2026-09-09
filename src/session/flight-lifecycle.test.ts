@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { newRun, retry } from '../arcade';
+import { advance, newRun, pickup, retry } from '../arcade';
 import type { GameMode } from '../arcade';
 import { FlightLifecycle } from './flight-lifecycle';
 
@@ -16,6 +16,7 @@ describe('damage and life transitions', () => {
     expect(hit.type).toBe('respawn'); expect(run.lives).toBe(2); expect(life.menu).toBe(''); expect(life.canStep(run)).toBe(true);
     expect(life.pendingRespawn).toBe('combat'); expect(life.damage(run, 1000)).toEqual({ type: 'ignored' });
     expect(life.fail(run, 'combat')).toEqual({ type: 'ignored' }); expect(run.lives).toBe(2);
+    if (mode === 'invaders') { expect(life.consumeRespawn(run)).toBeNull(); life.tick(run, 4); }
     expect(life.consumeRespawn(run)).toBe('combat'); expect(life.consumeRespawn(run)).toBeNull();
     expect(run).toMatchObject({ phase: 'playing', kills: 3, elapsed: 10, tiers: { spread: 2 }, pilot: { score: 700, hull: 100, shield: 100 }, accuracy: { shots: 3, hits: 1, misses: 2 } });
     expect(life.protection).toBe(3); expect(life.canStep(run)).toBe(true);
@@ -45,7 +46,7 @@ describe('damage and life transitions', () => {
     expect(run.chain.multiplier).toBe(1); expect(life.damage(run, 30)).toEqual({ type: 'ignored' });
     life.tick(run, 0.28); expect(life.damage(run, 10)).toEqual({ type: 'hit' }); expect(run.pilot.hull).toBe(80);
   });
-  it.each([[100, 10, 90], [10, 10, 0], [5, 10, 0], [1, 1000, 0]])('Invaders %i shield absorbs %i damage leaving %i shield without spending a life', (shield, damage, remainingShield) => {
+  it.each([[100, 10, 66], [66, 20, 32], [32, 10, 0], [5, 10, 0], [1, 1000, 0]])('Defensive Position %i shield absorbs %i damage leaving %i shield without spending a life', (shield, damage, remainingShield) => {
     const { run, life } = flight(); run.pilot.shield = shield;
     run.chain.multiplier = 5;
     expect(life.damage(run, damage)).toEqual({ type: 'hit' });
@@ -57,26 +58,39 @@ describe('damage and life transitions', () => {
     const { run, life } = flight(mode); run.pilot.shield = 0;
     expect(life.damage(run, 10)).toEqual({ type: 'hit' }); expect(run.pilot.hull).toBe(90);
   });
-  it.each([0, 20, 100])('one unshielded Invaders hit spends a life regardless of stored hull %i', hull => {
+  it.each([0, 20, 100])('one unshielded Defensive Position hit spends a life regardless of stored hull %i', hull => {
     const { run, life } = flight(); run.pilot.shield = 0;
     run.pilot.hull = hull; run.pilot.score = 1234; run.tiers.spread = 2; run.kills = 4;
     run.charge = 75; run.blastUsed = true;
     expect(life.damage(run, 1).type).toBe('respawn');
     expect(run).toMatchObject({ lives: 2, kills: 4, pilot: { score: 1234, shield: 100 }, tiers: { spread: 2 }, charge: 75, blastUsed: true });
     expect(life.damage(run, 1)).toEqual({ type: 'ignored' }); expect(run.lives).toBe(2);
+    expect(life.consumeRespawn(run)).toBeNull(); life.tick(run, 4);
     expect(life.consumeRespawn(run)).toBe('combat'); expect(life.protection).toBe(3);
     life.tick(run, 2.99); expect(life.damage(run, 10)).toEqual({ type: 'ignored' });
     life.tick(run, 0.01); expect(life.damage(run, 10)).toEqual({ type: 'hit' });
-    expect(run.pilot.shield).toBe(90); expect(run.lives).toBe(2);
+    expect(run.pilot.shield).toBe(66); expect(run.lives).toBe(2);
   });
-  it('ten ordinary Invaders bolts empty a full shield; the eleventh spends a life', () => {
+  it('three Defensive Position hits empty a full shield; the fourth spends a life', () => {
     const { run, life } = flight();
-    for (let hit = 1; hit <= 10; hit++) {
+    for (let hit = 1; hit <= 3; hit++) {
       expect(life.damage(run, 10)).toEqual({ type: 'hit' });
-      expect(run.pilot.shield).toBe(100 - hit * 10); expect(run.lives).toBe(3);
+      expect(run.pilot.shield).toBe(Math.max(0, 100 - hit * 34)); expect(run.lives).toBe(3);
       life.tick(run, 0.28);
     }
     expect(life.damage(run, 10).type).toBe('respawn'); expect(run.lives).toBe(2);
+  });
+  it('a partial repair absorbs a hit, and wave transitions do not refill the shield', () => {
+    const { run, life } = flight(); run.pilot.shield = 0;
+    pickup(run, { type: 'shieldCell', amount: 1 }); expect(run.pilot.shield).toBe(30);
+    advance(run); life.launch(run); expect(run.pilot.shield).toBe(30);
+    expect(life.damage(run, 10)).toEqual({ type: 'hit' }); expect(run.pilot.shield).toBe(0);
+    life.tick(run, 0.28); expect(life.damage(run, 10).type).toBe('respawn');
+  });
+  it.each([100, 125, 150])('a saved shield capacity of %i still absorbs exactly three hits', capacity => {
+    const { run, life } = flight(); run.pilot.shield = run.pilot.maxShield = capacity;
+    for (let i = 0; i < 3; i++) { expect(life.damage(run, 10)).toEqual({ type: 'hit' }); life.tick(run, 0.28); }
+    expect(run.pilot.shield).toBe(0); expect(life.damage(run, 10).type).toBe('respawn');
   });
 });
 describe('protection and pause contracts', () => {
@@ -89,7 +103,7 @@ describe('protection and pause contracts', () => {
     life.tick(run, 0.01); expect(life.protection).toBe(0); expect(life.damage(run, 1).type).toBe('hit');
   });
   it('stage rebuild preserves only the supplied remaining shield time', () => {
-    const { run, life } = flight(); life.fail(run, 'combat'); life.consumeRespawn(run); life.tick(run, 1);
+    const { run, life } = flight(); life.fail(run, 'combat'); life.tick(run, 4); life.consumeRespawn(run); life.tick(run, 1);
     life.resetStage(life.protection); expect(life.protection).toBe(2); expect(life.grace).toBe(0);
     life.tick(run, 2); expect(life.protection).toBe(0); life.resetStage(); expect(life.protection).toBe(0); expect(life.grace).toBe(3);
     life.resetStage(10); expect(life.protection).toBe(3); life.resetStage(-1); expect(life.protection).toBe(0);
@@ -108,8 +122,8 @@ describe('protection and pause contracts', () => {
     const { run, life } = flight(); run.lives = 1; life.fail(run, 'checkpoint');
     life.tick(run, 3600); expect(life.menu).toBe('gameover'); expect(life.canStep(run)).toBe(false);
   });
-  it('Smuggler pauses for four active seconds before respawning, with focus/menu pause support', () => {
-    const { run, life } = flight('smuggler'); life.fail(run, 'checkpoint');
+  it.each(['smuggler', 'invaders'] as const)('%s pauses for four active seconds before respawning, with focus/menu pause support', mode => {
+    const { run, life } = flight(mode); life.fail(run, 'checkpoint');
     expect(life.respawnDelay).toBe(4); expect(life.consumeRespawn(run)).toBeNull();
     life.tick(run, 2); expect(life.respawnDelay).toBe(2); expect(life.pause(run)).toBe(true);
     life.tick(run, 100); expect(life.respawnDelay).toBe(2); life.launch(run);

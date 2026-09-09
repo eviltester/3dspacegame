@@ -16,7 +16,7 @@ describe('tunnel weapon pacing', () => {
         for (const mode of ['journey', 'endless', 'smuggler'] as const) {
           expect(weaponSpec(family, tier, mode)).toEqual(normal);
         }
-        const invaderDelay = { pulse: 0.6, spread: 1, lance: 1.4 }[family];
+        const invaderDelay = { pulse: 0.6, spread: 1.4, lance: 1.4 }[family];
         expect(weaponSpec(family, tier, 'invaders').cooldown).toBeCloseTo(invaderDelay * (1 - (tier - 1) * 0.08));
       }
     );

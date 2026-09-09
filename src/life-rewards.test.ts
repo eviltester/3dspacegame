@@ -29,7 +29,7 @@ describe('score-based lives', () => {
     const smuggler = newRun('smuggler', 1); smuggler.pilot.score = 35000;
     expect(awardScoreLives(smuggler)).toBe(1); expect(smuggler.nextLifeScore).toBe(70000);
   });
-  it('normalizes a saved Invaders checkpoint into its continuous recovery flow', () => {
+  it('normalizes a saved Defensive Position checkpoint into its continuous recovery flow', () => {
     const profile = freshProfile(), run = newRun('invaders', 1);
     run.cleared = true; run.phase = 'shop'; run.nextLifeScore = 5000; run.pilot.score = 21000;
     profile.checkpoints.invaders = run;
@@ -73,14 +73,14 @@ describe('continuous combat lives and repairs', () => {
     pickup(run, { type: 'shieldCell', amount: 9 });
     expect(run.pilot.hull).toBe(mode === 'invaders' ? 40 : 100); expect(run.pilot.shield).toBe(100);
   });
-  it('Invaders cannot dock or buy, and waves do not auto-repair the shield', () => {
+  it('Defensive Position cannot dock or buy, and waves do not auto-repair the shield', () => {
     const run = newRun('invaders', 1); run.phase = 'recovery'; run.cleared = true;
     run.pilot.shield = 20; run.pilot.credits = 10000;
     dock(run); expect(run.phase).toBe('recovery');
     run.phase = 'shop'; expect(purchase(run, 'repair')).toBe(false);
     advance(run); expect(run.stage).toBe(2); expect(run.pilot.shield).toBe(20);
   });
-  it('capped Invaders weapon cores award points instead of money', () => {
+  it('capped Defensive Position weapon cores award points instead of money', () => {
     const run = newRun('invaders', 1); run.tiers.pulse = 2;
     pickup(run, { type: 'weaponCore', amount: 1 });
     expect(run.pilot.score).toBe(240); expect(run.pilot.credits).toBe(0);

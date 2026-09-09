@@ -8,7 +8,7 @@ import type { Actor, Shot } from './types';
 
 export const MAX_PROJECTILES = 240;
 export interface ProjectileCallbacks {
-  damageActor(actor: Actor, damage: number, byPlayer: boolean): void;
+  damageActor(actor: Actor, damage: number, byPlayer: boolean, family: WeaponFamily): void;
   damagePlayer(damage: number, message: string): void;
   intercepted(position: THREE.Vector3): void;
   npcHit(): void;
@@ -22,9 +22,9 @@ export function canProjectileHit(shot: Shot, actor: Actor): boolean {
   // for an essential station, which pirates can attack during a defence mission.
   if (actor.dead || actor.id === shot.source || shot.hit.has(actor.id) || actor.faction === shot.faction || !Number.isFinite(actor.hull)) return false;
   if (actor.kind === 'base' && !actor.essential) return false;
-  if (shot.faction === 'player') return ['pirate', 'police', 'trader', 'part', 'mine'].includes(actor.kind);
+  if (shot.faction === 'player') return ['pirate', 'police', 'trader', 'part', 'mine', 'asteroid'].includes(actor.kind);
   if (shot.faction === 'pirate') return actor.kind === 'police' || actor.kind === 'trader' || (actor.kind === 'base' && actor.essential);
-  return actor.kind === 'pirate' || actor.kind === 'part' || actor.kind === 'mine';
+  return actor.kind === 'pirate' || actor.kind === 'part' || actor.kind === 'mine' || actor.kind === 'asteroid';
 }
 
 export class ProjectileSystem {
@@ -37,7 +37,7 @@ export class ProjectileSystem {
     if (this.active.length >= MAX_PROJECTILES) return false;
     const object = createBoltModel(color, radius, length, faction, family);
     object.position.copy(position); object.lookAt(position.clone().add(direction)); this.world.add(object);
-    this.active.push({ id: this.allocateId(), source, faction, target, object, previous: position.clone(), velocity: direction.clone().multiplyScalar(speed),
+    this.active.push({ id: this.allocateId(), source, faction, target, family, object, previous: position.clone(), velocity: direction.clone().multiplyScalar(speed),
       damage, radius, ttl: faction === 'player' ? 1.35 : 3.2, pierce, hit: new Set() });
     return true;
   }
@@ -90,7 +90,7 @@ export class ProjectileSystem {
         // A piercing bolt may overlap a ship for several ticks but can damage it once.
         shot.hit.add(actor.id); shot.pierce--;
         if (shot.faction === 'player') callbacks.playerContact?.(shot);
-        callbacks.damageActor(actor, shot.damage, shot.faction === 'player');
+        callbacks.damageActor(actor, shot.damage, shot.faction === 'player', shot.family);
         if (shot.faction !== 'player') callbacks.npcHit();
         if (shot.pierce <= 0) expired.add(shot);
       } else {

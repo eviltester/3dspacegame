@@ -20,6 +20,9 @@ import { smugglerFlightPoints, smugglerFlightScore } from '../smuggler';
 import { canyonHaulPoints, HAUL_PICKUP_POINTS } from '../canyon-combat';
 import { SMUGGLER_TIME_RATE, smugglerResultLines } from '../smuggler-rewards';
 import { tunnelHud } from '../tunnels/hud';
+import { isInvaderField, invaderFieldDuration } from '../invader-events';
+import { DEFENSIVE_ARRIVAL_SECONDS } from '../session/defensive-sequence';
+import type { DefensiveSequencePhase } from '../session/defensive-sequence';
 
 export interface HudFrame {
   menu: string;
@@ -38,7 +41,10 @@ export interface HudFrame {
   recovery: number;
   intermission: number;
   respawnDelay: number;
+  defensiveSequence?: DefensiveSequencePhase;
+  escapeBonusTime?: number;
   arrivalTime: number;
+  arrivalMessage?: string;
   rescued: boolean;
   objectiveShip: Actor | null;
   director: Pick<EncounterDirector, 'flight' | 'totalFlights'>;
@@ -83,7 +89,8 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   };
   const protectedFlight = frame.protection > 0 && !frame.menu;
   const intermission = frame.intermission > 0 && !frame.menu;
-  const lifeLost = frame.respawnDelay > 0 && !frame.menu;
+  const respawning = frame.respawnDelay > 0;
+  const lifeLost = respawning && !frame.menu;
   const smuggler = frame.run?.mode === 'smuggler';
   const invaders = frame.run?.mode === 'invaders';
   toggle('.game-shell', 'smuggler-hud', smuggler);
@@ -93,7 +100,7 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   model.hidden['#survivalStats'] = !smuggler && !invaders;
   model.hidden['#topDamageStat'] = frame.run?.mode === 'tunnels' || invaders;
   model.hidden['#livesReadout'] = smuggler || invaders;
-  model.hidden['#lifeLost'] = !lifeLost;
+  model.hidden['#lifeLost'] = !lifeLost || invaders && frame.respawnDelay <= DEFENSIVE_ARRIVAL_SECONDS;
   toggle('.game-shell', 'life-lost', lifeLost);
   const touch = frame.profile.settings.controlScheme === 'touch';
   const armadaLocked = frame.definition.kind === 'armada' && (!frame.run?.cleared || frame.run.mode === 'invaders') && !frame.bonus;
@@ -114,6 +121,7 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   }
   if (!frame.run) return model;
   const run = frame.run; const pilot = run.pilot;
+  text('lifeLostHeading', invaders ? 'SHIP DESTROYED' : 'LIFE LOST');
   if (lifeLost) {
     text('lifeLostLives', `${run.lives} LIVES LEFT`);
     text('lifeLostCountdown', `RESTART IN ${Math.max(1, Math.ceil(frame.respawnDelay - 1e-6))} SECONDS`);
@@ -140,10 +148,10 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   const score = smuggler && bonus ? smugglerFlightScore(pilot.score, bonus) : pilot.score;
   const canyon = frame.bonus?.canyon;
   const asteroids = frame.bonus?.asteroidRun;
-  const modeLabel = { journey: 'JOURNEY', endless: 'ATTACK', invaders: 'INVADERS', smuggler: 'SMUGGLER', tunnels: 'TUNNELS' }[run.mode];
+  const modeLabel = { journey: 'JOURNEY', endless: 'ATTACK', invaders: 'DEFENSIVE POSITION', smuggler: 'SMUGGLER', tunnels: 'TUNNELS' }[run.mode];
   text('stageLabel', `${run.practice ? 'TEST / ' : ''}${smuggler ? `SMUGGLER LEG ${run.stage} / D${bonus?.difficulty ?? 1}` : bonus ? `BONUS / DIFFICULTY ${bonus.difficulty}` : `${modeLabel} ${MODE_INFO[run.mode].unit} ${run.stage}`}`);
   text('sectorName', invaders ? `ACCURACY ${run.accuracy.shots ? `${accuracyPercent(run.accuracy)}%` : '--'}` : bonus ? BONUS_NAMES[bonus.kind] : frame.definition.title);
-  text('reputation', invaders ? `HIT ${run.accuracy.hits}/${run.accuracy.shots} / MISS ${run.accuracy.misses}` : smuggler ? `LEG START ${pilot.score}` : bonus ? 'MAIN SHIP SAFE' : pilot.wanted.active ? `WANTED / HEAT ${pilot.wanted.heat}` : 'SECTOR CLEARANCE: CLEAN');
+  text('reputation', invaders ? `${pilot.wanted.active ? 'WANTED / ' : ''}HIT ${run.accuracy.hits}/${run.accuracy.shots} / MISS ${run.accuracy.misses}` : smuggler ? `LEG START ${pilot.score}` : bonus ? 'MAIN SHIP SAFE' : pilot.wanted.active ? `WANTED / HEAT ${pilot.wanted.heat}` : 'SECTOR CLEARANCE: CLEAN');
   text('scoreReadout', String(Math.floor(score)).padStart(6, '0'));
   text('arcadeScore', String(Math.floor(score)).padStart(6, '0'));
   const recordKey: keyof ProfileSaveV2['records'] = frame.menu === 'title' ? frame.selectedMode : `${run.mode}${run.continued ? 'Continued' : ''}`;
@@ -174,13 +182,19 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   model.hidden['.reticle'] = armadaLocked;
   text('missionTitle', bonus ? `${Math.ceil(bonus.remaining)} SECONDS` : run.phase === 'recovery' ? `NEXT WAVE IN ${Math.ceil(frame.recovery)}` : run.cleared ? 'MISSION COMPLETE' : armadaLocked ? run.mode === 'invaders' ? 'BREAK THE FORMATION' : 'TRACTOR BEAM LOCKED' : frame.definition.kind === 'boss' ? 'BREAK THE OUTER SYSTEMS' : 'CLEAR THE PIRATE FLIGHTS');
   const arrival = frame.arrivalTime > 0 && run.phase === 'playing' && !bonus;
-  if (arrival) text('missionTitle', 'REINFORCEMENTS ARRIVED');
+  if (invaders && isInvaderField(run.stage) && !run.cleared) text('missionTitle', 'SURVIVE THE FIELD');
+  if (arrival) text('missionTitle', frame.arrivalMessage?.startsWith('WANTED') ? 'WANTED!'
+    : frame.arrivalMessage?.startsWith('ASTEROID STORM') ? 'ASTEROID STORM'
+    : frame.arrivalMessage?.startsWith('GOLD 2X') ? 'DOUBLE SCORE TARGET'
+    : frame.arrivalMessage?.startsWith('BONUS COURIER') ? 'BONUS COURIER'
+    : frame.arrivalMessage?.startsWith('LAST ALIEN') ? 'LAST CHANCE' : 'REINFORCEMENTS ARRIVED');
   toggle('#missionTitle', 'arrival-alert', arrival);
   const boss = frame.actors.find(actor => actor.kind === 'pirate' && actor.essential && actor.role === 'carrier');
   const objective = boss ? `${frame.actors.filter(actor => actor.parent === boss.id).length} OUTER SYSTEMS / CORE ${Math.ceil(boss.hull / boss.maxHull * 100)}%`
     : frame.definition.kind === 'rescue' && !frame.rescued ? (pilot.inventory.rescuePods ? 'DELIVER POD TO STATION' : 'COLLECT THE WHITE POD')
     : frame.objectiveShip ? `PROTECT ${frame.definition.kind === 'escort' ? 'CONVOY' : 'STATION'}: ${Math.ceil(Math.max(0, frame.objectiveShip.hull))}` : `FLIGHT ${frame.director.flight}/${frame.director.totalFlights} / ${hostiles().length} HOSTILES`;
   text('missionProgress', canyon ? canyon.nextGate >= 18 ? 'FLY THROUGH EXIT' : `GATE ${canyon.nextGate + 1}/18 / +${canyon.nextGatePoints}` : asteroids?.exitApproach ? 'FLY THROUGH THE EXIT GATE' : bonus ? bonus.kind === 'sequence' ? `NEXT MARKER ${Math.min(bonus.targetCount, bonus.nextMarker)} / ${bonus.targetCount}` : `SALVAGE ${bonus.points} / SKIFF ${bonus.health}` : run.cleared ? run.phase === 'recovery' ? `${controls.fire} TO START NOW` : 'HEAD TO THE WARP GATE!' : objective);
+  if (invaders && isInvaderField(run.stage) && !run.cleared) text('missionProgress', `ASTEROID FIELD / SURVIVE ${Math.max(0, Math.ceil(invaderFieldDuration(run.stage) - run.elapsed))}s`);
   const sequence = bonus?.kind === 'sequence' ? bonus : null;
   // Miss deductions are score, not negative cargo. Keep the belt objective literal.
   if (smuggler && bonus?.kind === 'asteroids' && !asteroids?.exitApproach) text('missionProgress', 'REACH EXIT');
@@ -199,8 +213,17 @@ export function buildHud(frame: HudFrame, now = 0): HudModel {
   toggle('#hitCallout', 'active', protectedFlight || frame.feedbackTime > 0);
   model.styles['#hitConfirm'] = { opacity: frame.hitTime > 0 ? '1' : '0' };
   model.styles['#scorePopup'] = { opacity: frame.popupTime > 0 ? '1' : '0' };
+  if ((frame.escapeBonusTime ?? 0) > 0) {
+    text('scorePopup', 'LAST ALIEN +500 BONUS'); model.styles['#scorePopup'] = { opacity: '1' };
+  }
   model.hidden['#bonusExitButton'] = !bonus || smuggler;
-  model.hidden['#nextWaveButton'] = run.phase !== 'recovery';
+  const transitioning = frame.defensiveSequence === 'arriving' || frame.defensiveSequence === 'departing';
+  model.hidden['#nextWaveButton'] = run.phase !== 'recovery' || transitioning;
+  if (transitioning) {
+    text('missionTitle', frame.defensiveSequence === 'departing' ? 'WARPING TO NEXT WAVE' : `ARRIVING AT WAVE ${run.stage}`);
+    text('missionProgress', frame.defensiveSequence === 'departing' ? 'PLATFORM RELEASED' : 'STAND BY');
+    model.hidden['#touchTools'] = true;
+  }
   let destination: Actor | null = run.cleared ? run.phase === 'recovery' ? null : frame.gate : frame.definition.kind === 'rescue' && !frame.rescued ? (pilot.inventory.rescuePods ? frame.base : frame.objectivePod) : frame.objectiveShip;
   if (!destination && hostiles().length) destination = hostiles().sort((a, b) => a.object.position.distanceToSquared(frame.position) - b.object.position.distanceToSquared(frame.position))[0];
   const showDirections = !bonus && !invaders;

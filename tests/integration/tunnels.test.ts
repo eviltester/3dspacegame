@@ -6,7 +6,7 @@ it('shows only lives and shield in tunnels and restores the damage meter in Smug
   const game = new GameHarness(); await game.start('tunnels'); game.step(0.01);
   expect(document.querySelector<HTMLElement>('#topDamageStat')!.hidden).toBe(true);
   expect(game.text('#topLives')).toBe('3'); expect(game.text('#topShield')).toBe('100');
-  expect(game.text('#screenContent')).toContain('the next hit costs one life');
+  expect(game.state().menu).toBe('');
   await game.action('pause'); await game.action('title'); await game.start('smuggler'); game.step(0.01);
   expect(document.querySelector<HTMLElement>('#topDamageStat')!.hidden).toBe(false);
   expect(game.text('#topDamage')).toBe('0');
@@ -16,11 +16,13 @@ it('selects a mode, starts, opens pause settings and resumes using only arrows a
   const game = new GameHarness(), user = userEvent.setup();
   const selected = () => (document.activeElement as HTMLElement)?.dataset.action;
   expect(selected()).toBe('newRun');
-  await user.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}'); expect(selected()).toBe('mode:tunnels');
+  // Browse to the named choice, independent of how many information tabs exist.
+  for (let i = 0; selected() !== 'mode:tunnels' && i < 20; i++) await user.keyboard('{ArrowUp}');
+  expect(selected()).toBe('mode:tunnels');
   await user.keyboard(' '); expect(game.state().menu).toBe('title');
-  await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}'); expect(selected()).toBe('newRun');
-  await user.keyboard('{Enter}'); expect(game.state().menu).toBe('briefing');
-  await user.keyboard('z'); expect(game.state().menu).toBe(''); expect(game.state().mode).toBe('tunnels');
+  for (let i = 0; selected() !== 'newRun' && i < 20; i++) await user.keyboard('{ArrowDown}');
+  expect(selected()).toBe('newRun');
+  await user.keyboard('{Enter}'); expect(game.state().menu).toBe(''); expect(game.state().mode).toBe('tunnels');
   game.step(0.1); expect(game.state().accuracy?.shots).toBe(0);
   await user.keyboard('{Escape}'); expect(game.state().menu).toBe('pause');
   await user.keyboard('{ArrowDown}'); expect(selected()).toBe('controls');
@@ -32,7 +34,7 @@ it('selects a mode, starts, opens pause settings and resumes using only arrows a
 
 it('starts tunnel play, accepts mouse movement/fire, and pauses without advancing or holding fire', async () => {
   const game = new GameHarness(); await game.start('tunnels');
-  expect(game.text('#missionBriefTitle')).toBe('DEFEND THE EDGE');
+  expect(document.querySelector('#missionBriefTitle')).toBeNull();
   const canvas = document.querySelector('canvas')!;
   game.debug.lookByMouse(90,500); game.step(0.4);
   expect(game.state().tunnel?.lane).toBeCloseTo(2);
@@ -62,7 +64,7 @@ it('automatically progresses after salvage and a paid three-second result, inclu
   game.step(3); expect(game.state().tunnel?.phase).toBe('collapse');
   game.step(3); expect(game.state().tunnel?.phase).toBe('result'); expect(game.text('#courseAwards')).toContain('CLEAR +300');
   const score = game.state().score;
-  document.querySelector<HTMLButtonElement>('#pauseButton')!.click(); await game.action('title'); await game.action('resumeRun'); await game.action('launch');
+  document.querySelector<HTMLButtonElement>('#pauseButton')!.click(); await game.action('title'); await game.action('resumeRun');
   expect(game.state().score).toBe(score); game.step(3.2);
   expect(game.state().stage).toBe(2); expect(game.state().menu).toBe(''); expect(game.state().phase).toBe('playing'); expect(game.state().score).toBe(score);
 });
@@ -70,10 +72,10 @@ it('automatically progresses after salvage and a paid three-second result, inclu
 it('restores a mid-assault snapshot and exposes a separate score screen', async () => {
   const game = new GameHarness(); await game.start('tunnels'); game.step(4); game.debug.lookByMouse(180,0); game.step(0.7);
   const snapshot = game.state().tunnel;
-  document.querySelector<HTMLButtonElement>('#pauseButton')!.click(); await game.action('title'); await game.action('resumeRun'); await game.action('launch');
+  document.querySelector<HTMLButtonElement>('#pauseButton')!.click(); await game.action('title'); await game.action('resumeRun');
   expect(game.state().tunnel).toEqual(snapshot);
   document.querySelector<HTMLButtonElement>('#pauseButton')!.click(); await game.action('title'); await game.action('scores');
-  expect(game.text('#briefingStatus')).toBe('TEMPESTUOUS TUNNELS');
+  expect(game.text('#title-panel-scores .panel-heading')).toBe('TEMPESTUOUS TUNNELS');
 });
 
 it('accepts precise keyboard movement and fire with the default mouse layout', async () => {
@@ -90,7 +92,7 @@ it('accepts precise keyboard movement and fire with the default mouse layout', a
 it('resumes a paused collapse without skipping the result or paying twice', async () => {
   const game = new GameHarness(); await game.start('tunnels'); game.debug.finishEncounter(); game.step(3.5);
   expect(game.state().tunnel?.phase).toBe('collapse'); const remaining = game.state().tunnel?.remaining;
-  document.querySelector<HTMLButtonElement>('#pauseButton')!.click(); await game.action('title'); await game.action('resumeRun'); await game.action('launch');
+  document.querySelector<HTMLButtonElement>('#pauseButton')!.click(); await game.action('title'); await game.action('resumeRun');
   expect(game.state().tunnel?.remaining).toBe(remaining);
   game.step(2.7); expect(game.state().tunnel?.phase).toBe('result'); expect(game.state().score).toBe(300);
   game.step(3.1); expect(game.state().stage).toBe(2); expect(game.state().score).toBe(300);

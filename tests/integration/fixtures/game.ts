@@ -71,12 +71,24 @@ export class GameHarness {
     const button = document.querySelector<HTMLButtonElement>(`[data-action="${name}"]`);
     expect(button, `menu action ${name}`).not.toBeNull();
     expect(button!.disabled, `enabled action ${name}`).toBe(false);
+    expect(button!.closest('[hidden], [inert]'), `visible action ${name}`).toBeNull();
     button!.click();
     // Flush the audio-start / input-engage promise chain, never wall-clock sleep.
     await Promise.resolve(); await Promise.resolve();
   }
   async start(mode: GameMode = 'journey') {
-    await this.action(`mode:${mode}`); await this.action('newRun'); await this.action('launch');
+    await this.action(`mode:${mode}`); await this.action('newRun');
+    if (mode === 'journey' || mode === 'endless') {
+      expect(this.state().menu).toBe('briefing'); await this.action('launch');
+    }
+    expect(this.state().menu).toBe('');
+    // Most adapter checks begin in controllable flight. Cinematic timing has its
+    // own direct controller tests and explicit transition-wiring cases.
+    if (mode === 'invaders') this.step(1.2);
+  }
+  stage(number: number) {
+    this.debug.setStage(number);
+    if (this.state().mode === 'invaders') this.step(1.2);
   }
   step(seconds: number) { this.debug.step(seconds); }
 }

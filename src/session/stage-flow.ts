@@ -1,11 +1,15 @@
 /** Run transitions return destinations; the browser adapter only displays them. */
 import { advance, bonusFor, dock, JOURNEY_STAGE_COUNT, retry, settleBonus, settleStage, settleTimeBonus } from '../arcade';
-import type { RunState } from '../arcade';
+import type { GameMode, RunState } from '../arcade';
 import type { BonusRunState } from '../bonus';
 import { awardScoreLives } from '../life-rewards';
 import { settleSmugglerLeg } from '../smuggler';
 import type { ShotAccuracy } from '../combat/accuracy';
 import { canyonHaulPoints } from '../canyon-combat';
+
+export function needsMissionBriefing(mode: GameMode): boolean {
+  return mode === 'journey' || mode === 'endless';
+}
 
 export function completeEncounter(run: RunState, accuracy: ShotAccuracy) {
   if (run.phase !== 'playing') return null;

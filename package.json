@@ -10,14 +10,16 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix --max-warnings 0",
-    "test": "npm run test:unit && npm run test:integration && npm run test:e2e",
+    "test": "npm run test:coverage && npm run test:integration && npm run test:e2e",
     "test:unit": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:report": "playwright show-report",
-    "check": "npm run lint && npm run typecheck && npm run test:coverage && npm run test:integration && npm run test:e2e"
+    "check": "npm run lint && npm run typecheck && npm run test:coverage && npm run test:integration && npm run test:e2e",
+    "check:commit": "node tools/git-hooks.mjs check",
+    "prepare": "node tools/git-hooks.mjs install"
   },
   "dependencies": {
     "three": "^0.185.1"

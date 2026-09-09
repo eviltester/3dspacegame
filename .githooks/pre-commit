@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+# Git for Windows must bypass npm's Bash shim, which can resolve to WSL Bash.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) exec npm.cmd run check:commit ;;
+  *) exec npm run check:commit ;;
+esac

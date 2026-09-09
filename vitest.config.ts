@@ -4,18 +4,19 @@ import { defineConfig } from 'vitest/config';
 // Adapter wiring has its own config and is not included in unit coverage.
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'tools/**/*.test.ts'],
     environment: 'node',
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.ts'],
-      exclude: ['src/**/*.test.ts', 'src/main.ts', 'src/**/*.d.ts', 'src/testing/**'],
+      include: ['src/**/*.ts', 'tools/**/*.ts'],
+      exclude: ['**/*.test.ts', 'src/main.ts', 'src/**/*.d.ts', 'src/testing/**'],
       reporter: ['text', 'html', 'lcov'],
       thresholds: {
         // This global baseline counts ALL source, including uncovered browser
         // coordination. Do not inflate it with integration runs or exclusions.
         // Directly testable rules have their own, much stricter coverage gates.
         statements: 60, branches: 64, functions: 60, lines: 65,
+        'tools/*.ts': { lines: 100, branches: 90, functions: 100 },
         'src/audio/*.ts': { lines: 100, branches: 100, functions: 100 },
         'src/session/*.ts': { lines: 100, branches: 100, functions: 100 },
         'src/rendering/hud-model.ts': { lines: 100, branches: 90, functions: 100 },

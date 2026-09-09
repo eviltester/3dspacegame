@@ -1,6 +1,8 @@
 /** Transient flight state. No DOM, renderer, audio, input device or global clock. */
 import { clone, loseCombatLife, loseLife, resetChain } from '../arcade';
 import type { RunState } from '../arcade';
+import { DEFENSIVE_SHIELD_HITS } from '../combat/defensive-position';
+import { DEFENSIVE_DEATH_SECONDS } from './defensive-sequence';
 
 export const RESPAWN_PROTECTION_SECONDS = 3;
 export const SMUGGLER_LIFE_LOST_SECONDS = 4;
@@ -46,10 +48,13 @@ export class FlightLifecycle {
   damage(run: RunState, amount: number): DamageDecision {
     if (this.menu || this.paused || this.grace > 0 || this.protection > 0 || this.pendingRespawn || run.phase !== 'playing' || !Number.isFinite(amount) || amount <= 0) return { type: 'ignored' };
     const unshielded = run.pilot.shield <= 0;
-    const shield = Math.min(run.pilot.shield, amount);
+    // Round upward so a full shield is exhausted on the third contact, without
+    // a fractional sliver granting an extra hit. Repair pickups still add points.
+    const shieldDamage = run.mode === 'invaders' ? Math.ceil(run.pilot.maxShield / DEFENSIVE_SHIELD_HITS) : amount;
+    const shield = Math.min(run.pilot.shield, shieldDamage);
     run.pilot.shield -= shield;
     this.grace = 0.28; resetChain(run);
-    // Invaders has no hull buffer. Even a partial shield absorbs this hit;
+    // Defensive Position has no hull buffer. Even a partial shield absorbs this hit;
     // only a subsequent hit against an already empty shield spends a life.
     if (run.mode === 'invaders') {
       if (!unshielded) return { type: 'hit' };
@@ -72,7 +77,7 @@ export class FlightLifecycle {
       return { type: 'gameover', record: null };
     }
     this.pendingRespawn = kind;
-    this.respawnDelay = run.mode === 'smuggler' ? SMUGGLER_LIFE_LOST_SECONDS : 0;
+    this.respawnDelay = run.mode === 'smuggler' ? SMUGGLER_LIFE_LOST_SECONDS : run.mode === 'invaders' ? DEFENSIVE_DEATH_SECONDS : 0;
     return { type: 'respawn', record: null };
   }
   consumeRespawn(run: RunState): RespawnKind | null {

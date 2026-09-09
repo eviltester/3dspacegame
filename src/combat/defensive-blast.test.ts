@@ -35,7 +35,7 @@ it('uses player-relative range and cannot skip an enemy when a hit removes anoth
   expect(ids).toEqual([1, 2]); expect(actors).toHaveLength(0);
 });
 
-it('Invaders spends its wave allowance once while kills and interceptions continue recharging', () => {
+it('Defensive Position spends its wave allowance once while kills and interceptions continue recharging', () => {
   const run = newRun('invaders', 1); run.phase = 'playing'; run.charge = 100;
   const damage = vi.fn(), clear = vi.fn(), actors = [actorFixture()];
   expect(defensiveBlast(run, actors, new Vector3(), clear, damage)).toBe(true);
@@ -51,7 +51,7 @@ it('Invaders spends its wave allowance once while kills and interceptions contin
   expect(defensiveBlast(run, actors, new Vector3(), clear, damage)).toBe(true);
 });
 
-it('marks Invaders usage before damage callbacks can recharge or attempt a second blast', () => {
+it('marks Defensive Position usage before damage callbacks can recharge or attempt a second blast', () => {
   const run = newRun('invaders', 1); run.phase = 'playing'; run.charge = 100;
   const clear = vi.fn(), repeatedDamage = vi.fn();
   defensiveBlast(run, [actorFixture()], new Vector3(), clear, () => {

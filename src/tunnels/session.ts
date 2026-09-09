@@ -4,6 +4,7 @@ import type { SoundBank } from '../sound';
 import { nextTunnel, tunnelDamage } from './rules';
 import { TunnelSimulation } from './simulation';
 import { TunnelView } from './view';
+import { flashDamage } from '../rendering/damage-cracks';
 interface Hooks { notice(text: string): void; persist(): void; record(): void; next(): void; gameOver(): void; clearInput(): void; hit(): void }
 export class TunnelSession {
   readonly simulation: TunnelSimulation;
@@ -34,8 +35,7 @@ export class TunnelSession {
       case 'hit': this.sound.intercept(); this.hooks.hit(); break;
       case 'damage': {
         this.sound.damage(); this.hooks.notice(!this.run.skiff.health ? 'SHIP LOST' : this.run.skiff.shield > 0 ? 'SHIELD HIT' : 'SHIELDS DOWN - NEXT HIT LOSES A LIFE');
-        const layer = document.querySelector<HTMLElement>('#damageLayer')!;
-        layer.classList.remove('active'); void layer.offsetWidth; layer.classList.add('active'); break;
+        flashDamage(document.querySelector<HTMLElement>('#damageLayer')); break;
       }
       case 'life': this.hooks.clearInput(); this.sound.explosion(0); this.hooks.record(); break;
       case 'gameover': this.sound.gameOver(); this.hooks.record(); this.hooks.gameOver(); break;

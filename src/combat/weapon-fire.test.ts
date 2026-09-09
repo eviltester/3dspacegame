@@ -39,13 +39,13 @@ it('advances on simulation ticks only, including when a menu pauses simulation',
 it('leaves cooldown ready when the pool rejects all bolts and counts a partial volley', () => {
   const fire = new WeaponFire(), spec = weaponSpec('spread', 1, 'invaders');
   expect(fire.fire(spec, () => false)).toBe(0); expect(fire.remaining).toBe(0);
-  expect(fire.fire(spec, index => index !== 1)).toBe(2); expect(fire.remaining).toBe(1);
+  expect(fire.fire(spec, index => index !== 1)).toBe(2); expect(fire.remaining).toBe(1.4);
   fire.reset(); expect(fire.remaining).toBe(0);
 });
 
 it('gives Spread three separately tracked shots: one hit and two misses', () => {
   const fire = new WeaponFire(), tracker = new ShotAccuracy(), stats = emptyAccuracy();
-  fire.fire(weaponSpec('spread', 1, 'invaders'), index => { tracker.begin(index, stats, 8); return true; });
-  tracker.hit(1, stats); expect(tracker.finish(stats)).toBe(150);
+  fire.fire(weaponSpec('spread', 1, 'invaders'), index => { tracker.begin(index, stats, 'spread'); return true; });
+  tracker.hit(1, stats); expect(tracker.finish(stats)).toBe(200);
   expect(stats).toEqual({ shots: 3, hits: 1, misses: 2 });
 });

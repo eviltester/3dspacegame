@@ -5,6 +5,7 @@ import { stageDefinition } from '../encounters';
 import { GAME_MODES } from '../modes';
 import { createCatalog } from '../models/catalog';
 import { MenuViews } from './views';
+import { modeInstructions } from './instructions';
 
 // Drop odds are balance details. Accuracy and blast-charge percentages remain useful.
 const numericOdds = /\b(?:\d+|one)[ -]+(?:in|out[ -]+of)[ -]+(?:\d+|five|fifteen|thirty)\b|\b\d+(?:\.\d+)?\s*(?:%|percent|\/\d+)\s*(?:chance|probability|odds)/i;
@@ -24,7 +25,10 @@ it('describes repairs and gates without detailed balance figures in the Info Dec
   expect(gate).toBe('Fly through for points. Miss and get a penalty. The next gate pulses green while penalized.');
 });
 
-it.each(GAME_MODES)('%s briefings explain pickups without numeric odds', mode => {
+it.each(GAME_MODES)('%s instructions explain pickups without numeric odds', mode => {
+  expect(modeInstructions(mode, 'pulse', 'mouse')).not.toMatch(numericOdds);
+});
+it.each(['journey', 'endless'] as const)('%s mission briefings omit numeric drop odds', mode => {
   for (const stage of [1, 2, 10, 99]) {
     const run = newRun(mode, 1); run.stage = stage;
     expect(MenuViews.briefing(run, stageDefinition(mode, stage))[3]).not.toMatch(numericOdds);

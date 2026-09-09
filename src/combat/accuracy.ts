@@ -1,6 +1,7 @@
 /** Count each fired bolt separately; a piercing bolt can earn only one accuracy hit. */
+import type { WeaponFamily } from '../arcade';
+import { DEFENSIVE_MISS_PENALTIES } from './defensive-position';
 export interface WaveAccuracy { shots: number; hits: number; misses: number }
-export function invaderMissCost(aliens: number): number { return aliens > 10 ? 100 : aliens > 5 ? 75 : 50; }
 export const emptyAccuracy = (): WaveAccuracy => ({ shots: 0, hits: 0, misses: 0 });
 export function accuracyPercent(stats: WaveAccuracy): number {
   return stats.shots ? Math.round(stats.hits / stats.shots * 100) : 0;
@@ -15,11 +16,11 @@ export function parseAccuracy(value: unknown): WaveAccuracy {
 
 export class ShotAccuracy {
   private pending = new Map<number, { hit: boolean; missCost: number }>();
-  begin(id: number, stats: WaveAccuracy, aliens: number): void {
+  begin(id: number, stats: WaveAccuracy, family: WeaponFamily): void {
     if (this.pending.has(id)) return;
-    // Price the opportunity when fired. Kills, arrivals or wave completion cannot
-    // change the penalty of a bolt already in flight.
-    this.pending.set(id, { hit: false, missCost: invaderMissCost(aliens) });
+    // Capture the firing weapon's penalty. Switching while a bolt is in flight
+    // must not change its cost, including at wave-clear settlement.
+    this.pending.set(id, { hit: false, missCost: DEFENSIVE_MISS_PENALTIES[family] });
     stats.shots++;
   }
   hit(id: number, stats: WaveAccuracy): void {

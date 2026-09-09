@@ -3,6 +3,7 @@
  * disabled actions and focus can be exercised without a GPU or running a game.
  */
 import type { MenuPreview } from './views';
+import { informationTabs, TITLE_TABS, type TitleTab } from './information-tabs';
 export const button = (action: string, label: string, extra = '') => `<button type="button" data-action="${action}" ${extra}>${label}</button>`;
 
 export class MenuShell {
@@ -10,6 +11,7 @@ export class MenuShell {
   readonly overlay: HTMLDivElement;
   readonly radar: HTMLCanvasElement;
   screen = 'title';
+  titleTab: TitleTab = 'game';
   title = '3D VECTOR SPACE SHOOTER';
 
   constructor(private root: HTMLElement, private action: (name: string) => void, private browse: (direction: number) => void) {
@@ -41,13 +43,16 @@ export class MenuShell {
           </div>
         </div>
         <section id="courseSummary" class="course-summary" role="status" aria-label="Level complete" hidden><h2 id="courseHeading">LEVEL COMPLETE</h2><p id="courseHaul" hidden></p><p id="courseAwards" hidden></p><p id="courseScore"></p><p id="courseLives"></p><p id="courseCondition" hidden></p><p id="courseNext"></p></section>
-        <section id="lifeLost" class="life-lost-screen" role="status" hidden><h2>LIFE LOST</h2><p id="lifeLostLives"></p><p id="lifeLostCountdown"></p></section>
+        <section id="lifeLost" class="life-lost-screen" role="status" hidden><h2 id="lifeLostHeading">LIFE LOST</h2><p id="lifeLostLives"></p><p id="lifeLostCountdown"></p></section>
         <div id="damageLayer" class="damage-layer"></div><div id="protectionLayer" class="protection-layer" hidden></div><div id="warpLayer" class="warp-layer"></div>
         <div id="launchOverlay" class="launch-overlay">
           <div class="arcade-menu">
             <header class="arcade-header"><div class="arcade-scores"><span>1UP <strong id="arcadeScore">000000</strong></span><span>HI SCORE <strong id="arcadeBest">000000</strong></span></div><h1 id="launchTitle" class="screen-reader-only">3D VECTOR SPACE SHOOTER</h1><canvas id="vectorTitle" class="vector-title" aria-hidden="true"></canvas><p id="briefingStatus" class="briefing-status"></p></header>
             <div class="menu-layout"><div id="screenContent"></div>
-              <section id="modePreviewSection" class="mode-preview-section" aria-label="Selected mode preview"><div id="titleModePreview"><div id="modePreviewCopy"></div><div id="modeDemo" class="mode-demo"></div></div><div id="weaponPreviewCopy"></div></section>
+              <section id="modePreviewSection" class="mode-preview-section" aria-label="Selected mode preview">
+                ${informationTabs()}
+                <div class="title-panels">${TITLE_TABS.map(tab => `<div id="title-panel-${tab}" class="title-panel" role="tabpanel" aria-labelledby="title-tab-${tab}" ${tab === 'game' ? '' : 'hidden'}>${tab === 'game' ? '<div id="titleModePreview"><div id="modePreviewCopy"></div><div id="modeDemo" class="mode-demo"></div></div><div id="titleGameLoadout"></div><div id="weaponPreviewCopy"></div><div id="titleGameActions"></div>' : ''}</div>`).join('')}</div>
+              </section>
               <section id="catalogSection" class="model-card" aria-label="Info Deck"><div class="model-kicker"><p class="briefing-status">INFO DECK</p><p id="modelCount"></p></div><div id="modelPreview" class="model-preview"></div><div class="model-copy"><h2 id="modelTitle"></h2><p id="modelDescription"></p></div><div class="scan-buttons">${button('scanPrevious', '<', 'aria-label="Previous object" title="Previous object"')}${button('scanNext', '>', 'aria-label="Next object" title="Next object"')}</div><p class="scan-hint"><span>LEFT / RIGHT</span> Browse entries</p></section>
             </div>
           </div>
@@ -56,6 +61,8 @@ export class MenuShell {
     this.viewport = root.querySelector('#viewport')!;
     this.overlay = root.querySelector('#launchOverlay')!;
     this.radar = root.querySelector('#radar')!;
+    for (const panel of root.querySelectorAll<HTMLElement>('.title-panel')) panel.tabIndex = 0;
+    root.querySelector('#title-panel-objects')!.append(root.querySelector('#catalogSection')!);
     root.addEventListener('click', this.click);
     root.addEventListener('submit', this.submit);
     window.addEventListener('keydown', this.keydown);
@@ -63,7 +70,7 @@ export class MenuShell {
 
   private click = (event: MouseEvent): void => {
     const target = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-action]');
-    if (!target || target.disabled || this.overlay.hidden && this.overlay.contains(target)) return;
+    if (!target || target.disabled || target.closest('[hidden], [inert]') || this.overlay.hidden && this.overlay.contains(target)) return;
     if (target.dataset.action === 'scanPrevious') this.browse(-1);
     else if (target.dataset.action === 'scanNext') this.browse(1);
     else this.action(target.dataset.action!);
@@ -78,20 +85,38 @@ export class MenuShell {
 
   private keydown = (event: KeyboardEvent): void => {
     if (this.overlay.hidden || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
-    if (event.code === 'Escape' && ['controls', 'objects', 'scores', 'briefing', 'gameover'].includes(this.screen)) {
+    if (event.code === 'Escape' && this.screen === 'title' && this.titleTab !== 'game') {
+      event.preventDefault();
+      if (!event.repeat) { this.action('game'); this.root.querySelector<HTMLElement>('#title-tab-game')!.focus(); }
+      return;
+    }
+    if (event.code === 'Escape' && ['controls', 'briefing', 'gameover'].includes(this.screen)) {
       event.preventDefault();
       // Use the displayed exit action so Controls can return to either the
       // title or the paused flight without duplicating navigation decisions.
-      if (!event.repeat) this.focusable().find(item => item.dataset.action === 'backToPause' || item.dataset.action === 'title')?.click();
+      if (!event.repeat) {
+        if (this.screen === 'briefing') this.action('title');
+        else this.focusable().find(item => item.dataset.action === 'backToPause' || item.dataset.action === 'title')?.click();
+      }
       return;
     }
     const active = document.activeElement;
+    if (active instanceof HTMLElement && active.getAttribute('role') === 'tab' && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.code)) {
+      event.preventDefault();
+      const index = TITLE_TABS.indexOf(this.titleTab);
+      const next = event.code === 'Home' ? 0 : event.code === 'End' ? TITLE_TABS.length - 1
+        : (index + (event.code === 'ArrowRight' ? 1 : -1) + TITLE_TABS.length) % TITLE_TABS.length;
+      this.action(TITLE_TABS[next]);
+      this.root.querySelector<HTMLElement>(`#title-tab-${TITLE_TABS[next]}`)!.focus();
+      return;
+    }
     // Keep native arrows and letter keys in settings/Level Warp fields. Buttons
     // use the same visible focus order for arrow navigation and normal Tab.
-    const editing = active instanceof HTMLElement && (active.matches('input, select, textarea') || active.isContentEditable);
+    const editing = active instanceof HTMLElement && (active.matches('input, select, textarea, [role="tabpanel"]') || active.isContentEditable);
     if (!editing && (event.code === 'ArrowUp' || event.code === 'ArrowDown')) {
       event.preventDefault();
-      const items = this.focusable(), direction = event.code === 'ArrowDown' ? 1 : -1;
+      const items = this.focusable().filter(item => item.getAttribute('role') !== 'tabpanel');
+      const direction = event.code === 'ArrowDown' ? 1 : -1;
       const index = items.findIndex(item => item === active);
       const next = index < 0 ? direction > 0 ? 0 : items.length - 1 : (index + direction + items.length) % items.length;
       items[next]?.focus();
@@ -111,7 +136,7 @@ export class MenuShell {
         event.preventDefault(); target?.focus();
       }
     }
-    if (editing || !['objects', 'briefing'].includes(this.screen)) return;
+    if (editing || this.screen !== 'title' || this.titleTab !== 'objects') return;
     if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
       event.preventDefault(); this.browse(event.code === 'ArrowLeft' ? -1 : 1);
     }
@@ -120,8 +145,9 @@ export class MenuShell {
   private focusable(): HTMLElement[] {
     // Visibility is a DOM/style property here, not a measurement of element size.
     // Check ancestors too: hidden preview controls must not enter the focus loop.
-    return [...this.overlay.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled)')]
+    return [...this.overlay.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled), [role="tabpanel"]')]
       .filter(item => {
+        if (item.getAttribute('role') === 'tab' && item.tabIndex < 0) return false;
         for (let node: HTMLElement | null = item; node; node = node.parentElement) {
           const style = getComputedStyle(node);
           if (node.hidden || node.inert || style.display === 'none' || style.visibility === 'hidden') return false;
@@ -135,25 +161,53 @@ export class MenuShell {
     if (element && element.textContent !== value) element.textContent = value;
   }
 
+  /** Switching tabs retains panel DOM, scroll positions and the live preview canvas. */
+  selectTitleTab(tab: TitleTab): void {
+    if (this.screen !== 'title') return;
+    this.titleTab = tab;
+    this.overlay.dataset.tab = tab;
+    for (const name of TITLE_TABS) {
+      const selected = name === tab;
+      const button = this.root.querySelector<HTMLButtonElement>(`#title-tab-${name}`)!;
+      button.setAttribute('aria-selected', String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      const panel = this.root.querySelector<HTMLElement>(`#title-panel-${name}`)!;
+      panel.hidden = !selected;
+      panel.tabIndex = selected ? 0 : -1;
+    }
+    this.root.querySelector<HTMLElement>('#catalogSection')!.hidden = tab !== 'objects';
+    if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.title-panel[hidden]')) {
+      this.root.querySelector<HTMLElement>(`#title-tab-${tab}`)!.focus({ preventScroll: true });
+    }
+  }
+
   show(screen: string, title: string, status: string, content: string, preview?: MenuPreview): void {
     // Rebuilding a settings/shop view keeps the selected action when still usable.
     const previousAction = this.screen === screen && document.activeElement instanceof HTMLElement ? document.activeElement.dataset.action : undefined;
+    if (this.screen !== screen) this.overlay.scrollTop = 0;
     this.screen = screen; this.title = title;
     this.overlay.hidden = false;
     this.overlay.classList.remove('hidden');
-    this.overlay.dataset.mode = screen; this.overlay.scrollTop = 0;
+    this.overlay.dataset.mode = screen;
     this.text('launchTitle', title); this.text('briefingStatus', status);
     this.root.querySelector('#screenContent')!.innerHTML = content;
     this.root.querySelector('#modePreviewCopy')!.innerHTML = preview?.mode ?? '';
     this.root.querySelector('#weaponPreviewCopy')!.innerHTML = preview?.weapon ?? '';
+    for (const [id, content] of Object.entries({
+      titleGameLoadout: preview?.loadout, titleGameActions: preview?.actions,
+      'title-panel-instructions': preview?.instructions, 'title-panel-controls': preview?.controls,
+      'title-panel-scores': preview?.scores
+    })) this.root.querySelector(`#${id}`)!.innerHTML = content ?? '';
     const catalog = this.root.querySelector<HTMLElement>('#catalogSection')!;
-    catalog.hidden = screen !== 'objects' && screen !== 'briefing';
-    this.root.querySelector<HTMLElement>('#modePreviewSection')!.hidden = screen !== 'title';
+    catalog.hidden = true;
+    this.root.querySelector<HTMLElement>('#modePreviewSection')!.hidden = screen !== 'title' || !preview;
+    if (screen === 'title') this.selectTitleTab(preview?.tab ?? 'game');
     this.overlay.classList.toggle('compact-menu', catalog.hidden && screen !== 'title');
     this.root.querySelector<HTMLElement>('.flight-buttons')!.inert = true;
     const items = this.focusable();
     const focus = items.find(item => previousAction !== undefined && item.dataset.action === previousAction)
       ?? items.find(item => item.id === 'scoreInitials')
+      ?? items.find(item => screen === 'title' && this.titleTab !== 'game' && item.id === `title-tab-${this.titleTab}`)
       ?? items.find(item => item.id === 'resumeButton' || item.id === 'launchButton') ?? items[0];
     focus?.focus({ preventScroll: true });
   }

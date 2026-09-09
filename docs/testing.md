@@ -1,6 +1,6 @@
 # Testing
 
-`npm test` runs three separate layers: unit tests, adapter-wiring checks, and Chromium. `npm run check` runs lint, strict types, unit coverage, adapter checks and Chromium, once each. Playwright builds the production artifact before starting its isolated server on port 5180. The Pages test serves that artifact on port 5181; CI deploys it unchanged. The player's server and saves on port 5173 are never used.
+`npm test` runs three separate layers: unit tests with coverage thresholds, adapter-wiring checks, and Chromium. `npm run check` runs lint, strict types, unit coverage, adapter checks and Chromium, once each. Playwright builds the production artifact before starting its isolated server on port 5180. The Pages test serves that artifact on port 5181; CI deploys it unchanged. The player's server and saves on port 5173 are never used.
 
 Install the test browser once with `npx playwright install chromium`. Headless CI uses `npx playwright install --with-deps --only-shell chromium`.
 
@@ -16,7 +16,7 @@ Install the test browser once with `npx playwright install chromium`. Headless C
 | Asteroid/canyon dodging, target-camera aiming and movement after exit | `BonusController` with relative input and a real Three.js camera, no renderer |
 | Menu clicks, keyboard activation, focus wrapping/restoration, disabled choices and labelled fields | `MenuShell` plus production menu views, Testing Library and user-event |
 | Fatal damage, remaining lives, checkpoint rollback, queued respawn, pause/protection, game-over countdown | `FlightLifecycle`, with explicit run state and elapsed time |
-| Every Journey destination, high-wave recovery/boss routing, Invaders without docks | `completeEncounter`, `afterGate`, `nextStage` |
+| Every Journey destination, high-wave recovery/boss routing, Defensive Position without docks | `completeEncounter`, `afterGate`, `nextStage` |
 | Rescue delivery, surviving escorts, all flights/hostiles cleared | `encounterComplete`, with a minimal objective snapshot |
 | Guaranteed opening upgrade and reproducible salvage | `pirateSalvage` |
 | Pickup/repair/weapon state immediately reflected on HUD | `pickup` / `purchase` followed by pure `buildHud` |
@@ -50,9 +50,15 @@ The Happy DOM fixture stubs WebGL drawing, canvas rasterization, audio startup a
 
 `npm run test:coverage` runs **unit tests only**. The report includes all executable application source except the entry point, declarations and test fixtures. In particular, browser coordination remains visible as uncovered rather than being excluded to inflate the percentage.
 
-The current whole-source unit coverage is about 67% of lines. The session controllers, flight movement and aim assistance have **100% line, branch and function coverage**, enforced independently. The DOM menu shell has a 100% line/function gate and 95% branch floor. HUD projection has **100% line/function coverage** and a 90% branch floor; catalog timing has 100% across all three. Combat, world, progression and bonus controllers have their own higher thresholds in `vitest.config.ts`.
+The session controllers, flight movement and aim assistance have **100% line, branch and function coverage**, enforced independently. The DOM menu shell has a 100% line/function gate and 95% branch floor. HUD projection has **100% line/function coverage** and a 90% branch floor; catalog timing has 100% across all three. Combat, world, progression and bonus controllers have their own higher thresholds in `vitest.config.ts`.
 
 The whole-source floors (65% lines, 64% branches, 60% statements/functions) measure unit tests, not combined application/browser coverage. They guard that separate baseline. Read the per-file report when adding rules; do not put decisions back in the coordinator or lower a module threshold to accommodate untested logic. These figures are not evidence of correct pixels, native pointer lock or audio-device output.
+
+### Commit Coverage Gate
+
+Dependency installation runs `prepare`, which installs `.githooks/pre-commit`. Run `npm run prepare` once in an existing checkout. The hook invokes `npm run check:commit`, exporting the Git index to a temporary directory and running the staged `test:coverage` command without changing thresholds. Unstaged edits and untracked tests are not included; the real index and working tree are untouched. Installed dependencies are reused only when staged and working lockfiles match. Failed tests, insufficient coverage, missing dependencies and interrupted checks block the commit.
+
+The hook helpers have direct tests in `tools/git-hooks.test.ts`, with 100% line/function and 90% branch thresholds. Temporary Git repositories verify partial staging, alternate indexes, dependency errors, safe cleanup and real hook rejection/acceptance. They do not run the game or browser suite recursively. CI enforces coverage independently of local hooks.
 
 ## Browser Checks
 

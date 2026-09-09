@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { bonusFor, freshProfile, newRun, parseProfile, saveCheckpoint } from '../arcade';
 import type { GameMode } from '../arcade';
 import { ShotAccuracy } from '../combat/accuracy';
-import { afterGate, completeEncounter, enterBonus, nextStage, resumeDestination, settleCourse } from './stage-flow';
+import { afterGate, completeEncounter, enterBonus, needsMissionBriefing, nextStage, resumeDestination, settleCourse } from './stage-flow';
 import { parseSmugglerFlight } from '../smuggler-rewards';
 import type { CourseOutcome } from './stage-flow';
 
 function playing(mode: GameMode = 'journey', stage = 1) { const run = newRun(mode, 1); run.phase = 'playing'; run.stage = stage; return run; }
+it.each(['journey', 'endless', 'invaders', 'smuggler', 'tunnels'] as const)('%s requests a briefing only for changing missions', mode => {
+  expect(needsMissionBriefing(mode)).toBe(mode === 'journey' || mode === 'endless');
+});
 describe('completion destinations and payouts', () => {
   it.each(Array.from({ length: 99 }, (_, i) => i + 1))('Journey stage %i routes correctly without flying to it', stage => {
     const run = playing('journey', stage), tracker = new ShotAccuracy();
@@ -23,9 +26,9 @@ describe('completion destinations and payouts', () => {
     if (wave % 5) { expect(afterGate(run)).toBeNull(); expect(nextStage(run)!.timeBonus).toBe(1200); }
     else expect(afterGate(run)).toBe('bonusOffer');
   });
-  it.each([1, 3, 5, 8, 1000])('Invaders wave %i settles pending misses before life awards and cannot dock', stage => {
+  it.each([1, 3, 5, 8, 1000])('Defensive Position wave %i settles pending misses before life awards and cannot dock', stage => {
     const run = playing('invaders', stage), tracker = new ShotAccuracy(); run.pilot.score = 35000 - (250 + stage * 50) + 99;
-    tracker.begin(1, run.accuracy, 11);
+    tracker.begin(1, run.accuracy, 'pulse');
     expect(completeEncounter(run, tracker)).toEqual({ route: 'recovery', missCost: 100, extraLives: 0 });
     expect(run.pilot.score).toBe(34999); expect(run.lives).toBe(3); expect(afterGate(run)).toBeNull();
     expect(run.accuracy).toEqual({ shots: 1, hits: 0, misses: 1 });

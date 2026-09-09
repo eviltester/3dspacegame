@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { Random } from '../encounters';
 import type { Actor } from '../combat/types';
-import { createPulseRing, createStarTexture, disposeObject, lineShape } from '../models';
+import { createPulseRing, createStarTexture, createTextSprite, disposeObject, lineShape } from '../models';
 import { ShipExplosions } from './ship-explosions';
 
 interface Particle { object: THREE.Object3D; velocity: THREE.Vector3; life: number; duration: number; warpIn?: boolean }
@@ -18,6 +18,17 @@ export class EffectsSystem {
   get destruction() { return this.explosions.snapshot; }
   explodeShip(actor: Actor): void {
     this.explosions.explode(actor.object, actor.object.position.clone().sub(actor.previous).multiplyScalar(60));
+  }
+  flybyScore(position: THREE.Vector3, score: number): void {
+    const label = createTextSprite(`+${score}`, '#ffff70', undefined, 0.16, 0.05);
+    label.name = 'flyby-score'; label.userData.score = score;
+    label.position.copy(position);
+    // Billboard below the destruction point; distant flybys must not have tiny
+    // rewards. The sprite's anchor moves only its drawing, never the actor.
+    label.center.set(0.5, 1.6); label.material.sizeAttenuation = false;
+    label.material.depthTest = false; label.renderOrder = 10;
+    this.world.add(label);
+    this.particles.push({ object: label, velocity: new THREE.Vector3(), life: 2.2, duration: 2.2 });
   }
   clear(): void {
     this.explosions.clear();
@@ -68,6 +79,7 @@ export class EffectsSystem {
       part.life -= dt; part.object.position.addScaledVector(part.velocity, dt);
       if (part.warpIn) part.object.scale.setScalar(0.2 + Math.max(0, part.life / part.duration) * 1.4);
       if (part.object instanceof THREE.LineSegments) (part.object.material as THREE.LineBasicMaterial).opacity = Math.max(0, part.life / part.duration);
+      if (part.object instanceof THREE.Sprite) part.object.material.opacity = Math.max(0, part.life / part.duration);
     }
     this.particles = this.particles.filter(part => { if (part.life > 0) return true; this.world.remove(part.object); disposeObject(part.object); return false; });
   }

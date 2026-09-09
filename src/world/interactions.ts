@@ -68,6 +68,8 @@ export class WorldInteractions {
   }
   enforce(dt: number, frame: WorldFrame): void {
     const { run, position, base } = frame;
+    // Defensive Position has scripted police pursuits, not free-flight station dispatches.
+    if (run.mode === 'invaders') return;
     this.scanCooldown -= dt;
     if (base && position.distanceTo(base.object.position) < 110 && this.scanCooldown <= 0 && run.pilot.inventory.contraband > 0) {
       const result = resolveContrabandScan(run.pilot, `stage-${run.stage}`);

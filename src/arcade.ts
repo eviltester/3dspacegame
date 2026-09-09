@@ -54,7 +54,7 @@ export interface RunState extends RunResources {
   stageHaul: number | null;
   /** Per-wave projectile results, retained on cleared checkpoints. */
   accuracy: WaveAccuracy;
-  /** Invaders wave allowance; separate from charge and retryable equipment. */
+  /** Defensive Position wave allowance; separate from charge and retryable equipment. */
   blastUsed: boolean;
   practice?: boolean;
   mode: GameMode;
@@ -167,7 +167,7 @@ export function pickup(run: RunState, drop: CargoDrop): void {
   } else {
     const hull = run.pilot.hull;
     run.pilot = applyCargoPickup(run.pilot, drop);
-    // Keep the shared pickup values without granting Invaders a hull reserve.
+    // Keep the shared pickup values without granting Defensive Position a hull reserve.
     if (run.mode === 'invaders') run.pilot.hull = hull;
   }
 }

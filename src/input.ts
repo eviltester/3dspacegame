@@ -146,7 +146,9 @@ export class FlightInput {
     if (this.middleHold !== null) clearTimeout(this.middleHold);
     this.middleHold = null; this.middlePressed = false;
   }
-  clear(): void { this.firing = false; this.touchFiring = false; this.firePressed = false; this.dx = 0; this.dy = 0; this.wheelBoost = 0; this.boostHeld = false; this.boostDrive.reset(); this.keys.clear(); this.tunnelKeys.clear(); this.clearMiddle(); this.mobile.clear(); }
+  // Cinematics suppress flight commands but leave the hold-to-pause gesture live.
+  clearFlight(): void { this.firing = false; this.touchFiring = false; this.firePressed = false; this.dx = 0; this.dy = 0; this.wheelBoost = 0; this.boostHeld = false; this.boostDrive.reset(); this.keys.clear(); this.tunnelKeys.clear(); this.mobile.clear(); }
+  clear(): void { this.clearFlight(); this.clearMiddle(); }
   consumeLaneStep(dt: number): number { return this.active && this.tunnelControls ? this.tunnelKeys.consume(dt) : 0; }
   consumeFire(): boolean {
     const requested = this.active && (this.firing || this.touchFiring || this.firePressed || this.held(CONTROL_LAYOUTS[this.scheme].primary));

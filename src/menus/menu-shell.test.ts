@@ -5,11 +5,13 @@ import userEvent from '@testing-library/user-event';
 import { MenuShell, button } from './menu-shell';
 import { FrontMenus } from './front';
 import { MenuViews } from './views';
-import { freshProfile, newRun } from '../arcade';
+import { freshProfile, newRun, recordRun } from '../arcade';
+import { nameScore } from '../scores';
 import { GAME_MODES, MODE_INFO } from '../modes';
 import { CONTROL_LAYOUTS } from '../input-layouts';
 import { WEAPON_HELP } from '../weapons';
 import { stageDefinition } from '../encounters';
+import { isTitleTab, TITLE_TABS } from './information-tabs';
 
 let shell: MenuShell;
 let user: ReturnType<typeof userEvent.setup>;
@@ -17,9 +19,11 @@ const action = vi.fn<(name: string) => void>();
 const browse = vi.fn<(direction: number) => void>();
 
 beforeEach(() => {
-  document.body.innerHTML = '<div id="app"></div>';
+  // Happy DOM needs the browser's hidden-element display rule for native Tab emulation.
+  document.body.innerHTML = '<style>[hidden] { display: none !important; }</style><div id="app"></div>';
   action.mockReset(); browse.mockReset();
   shell = new MenuShell(document.querySelector('#app')!, action, browse);
+  action.mockImplementation(name => { if (isTitleTab(name)) shell.selectTitleTab(name); });
   user = userEvent.setup({ document });
 });
 afterEach(() => { shell.dispose(); document.body.innerHTML = ''; });
@@ -92,10 +96,9 @@ it('preserves typing and native arrow behaviour in editable fields', async () =>
   expect(document.activeElement).toBe(screen.getByRole('combobox')); expect(action).not.toHaveBeenCalled();
 });
 
-it.each(['controls', 'objects', 'scores', 'briefing', 'gameover'] as const)('Escape uses the Title Screen exit from %s regardless of focus', async view => {
+it.each(['briefing', 'gameover'] as const)('Escape returns from %s regardless of focus', async view => {
   const profile = freshProfile();
   const views = {
-    controls: FrontMenus.controls(profile), objects: FrontMenus.objects(), scores: FrontMenus.scores(profile, 'journey'),
     briefing: MenuViews.briefing(newRun('journey', 1), stageDefinition('journey', 1)),
     gameover: MenuViews.gameOver(newRun('journey', 1), profile)
   };
@@ -103,6 +106,16 @@ it.each(['controls', 'objects', 'scores', 'briefing', 'gameover'] as const)('Esc
   shell.overlay.querySelector<HTMLButtonElement>('button')!.focus();
   await user.keyboard('{Escape}');
   expect(action).toHaveBeenCalledExactlyOnceWith('title');
+});
+
+it.each(TITLE_TABS.filter(tab => tab !== 'game'))('Escape returns the %s panel to GAME without replacing the title', async tab => {
+  shell.show(...FrontMenus.title(freshProfile(), 'invaders', 'pulse', false, tab));
+  const choices = screen.getByRole('group', { name: 'Game mode' });
+  await user.keyboard('{Escape}');
+  expect(action).toHaveBeenCalledExactlyOnceWith('game');
+  expect(screen.getByRole('group', { name: 'Game mode' })).toBe(choices);
+  expect(screen.getByRole('tabpanel', { name: 'GAME' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'GAME' }));
 });
 
 it('Escape from a focused Controls slider returns to the pause menu', async () => {
@@ -113,13 +126,13 @@ it('Escape from a focused Controls slider returns to the pause menu', async () =
 });
 
 it('does not repeat or modify Escape navigation, or activate hidden exit buttons', async () => {
-  shell.show(...FrontMenus.objects());
-  await user.keyboard('{Escape>4/}'); expect(action).toHaveBeenCalledExactlyOnceWith('title');
+  shell.show(...FrontMenus.title(freshProfile(), 'journey', 'pulse', false, 'objects'));
+  await user.keyboard('{Escape>4/}'); expect(action).toHaveBeenCalledExactlyOnceWith('game');
   action.mockClear();
   await user.keyboard('{Control>}{Escape}{/Control}'); expect(action).not.toHaveBeenCalled();
   shell.show('objects', 'INFO DECK', '', `<div hidden>${button('title', 'TITLE SCREEN')}</div>`);
   await user.keyboard('{Escape}'); expect(action).not.toHaveBeenCalled();
-  shell.show(...FrontMenus.objects()); shell.hide();
+  shell.show(...FrontMenus.title(freshProfile(), 'journey', 'pulse', false, 'objects')); shell.hide();
   await user.keyboard('{Escape}'); expect(action).not.toHaveBeenCalled();
 });
 
@@ -160,8 +173,10 @@ it('shows weapon purposes and prevents locked starting choices from activating',
   const spread = screen.getByRole<HTMLButtonElement>('button', { name: 'SPREAD' });
   expect(spread.title).toBe(WEAPON_HELP.spread); expect(spread.disabled).toBe(true);
   await user.click(spread); expect(action).not.toHaveBeenCalled();
-  shell.show(...FrontMenus.weapons(freshProfile(), 'pulse'));
-  for (const help of Object.values(WEAPON_HELP)) expect(screen.getByText(help)).toBeTruthy();
+  for (const family of ['pulse', 'spread', 'lance'] as const) {
+    shell.show(...FrontMenus.title(freshProfile(), 'journey', family, false));
+    expect(screen.getByText(WEAPON_HELP[family])).toBeTruthy();
+  }
 });
 
 it('respects disabled shop purchases and moves focus if a purchase becomes unavailable', async () => {
@@ -192,8 +207,8 @@ it('Level Warp fields support labelled selection and typing before dispatching a
   expect(action).toHaveBeenCalledExactlyOnceWith('warpEndless');
 });
 
-it.each(['objects', 'briefing'])('%s supports object arrows with mouse and keyboard', async mode => {
-  shell.show(mode, 'CONTACTS', '', button('title', 'BACK'));
+it('Info Deck supports object arrows with mouse and keyboard', async () => {
+  shell.show(...FrontMenus.title(freshProfile(), 'journey', 'pulse', false, 'objects'));
   expect(screen.getByRole('region', { name: 'Info Deck' })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Next object' }));
   await user.click(screen.getByRole('button', { name: 'Previous object' }));
@@ -201,16 +216,69 @@ it.each(['objects', 'briefing'])('%s supports object arrows with mouse and keybo
   expect(browse.mock.calls).toEqual([[1], [-1], [1], [-1]]); expect(action).not.toHaveBeenCalled();
   await user.keyboard('{Control>}{ArrowRight}{/Control}'); expect(browse).toHaveBeenCalledTimes(4);
 });
+it('mission briefings have no Info Deck or object navigation', async () => {
+  shell.show(...MenuViews.briefing(newRun('journey', 1), stageDefinition('journey', 1)));
+  expect(screen.queryByRole('region', { name: 'Info Deck' })).toBeNull();
+  expect(within(shell.overlay).getAllByRole('button').map(item => item.textContent)).toEqual(['START MISSION']);
+  await user.keyboard('{ArrowLeft}{ArrowRight}'); expect(browse).not.toHaveBeenCalled();
+});
+it.each(GAME_MODES)('%s includes one plain radar paragraph in Instructions without duplicate contact guidance', async mode => {
+  shell.show(...FrontMenus.title(freshProfile(), mode, 'pulse', false, 'objects'));
+  const deck = screen.getByRole('tabpanel', { name: 'INFO DECK' });
+  expect(within(deck).queryByText('SECTOR CONTACTS')).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'SECTOR CONTACTS' })).toBeNull();
+  expect(within(deck).getByRole('button', { name: 'Next object' })).toBeTruthy();
+  await user.click(screen.getByRole('tab', { name: 'INSTRUCTIONS' }));
+  const instructions = screen.getByRole('tabpanel', { name: 'INSTRUCTIONS' });
+  expect(within(instructions).queryByRole('heading', { name: 'SECTOR CONTACTS' })).toBeNull();
+  const radar = within(instructions).getByText('Cargo and pickups appear as triangles on your radar. Warp Gates appear as crosses.');
+  expect(radar.tagName).toBe('P'); expect(radar.parentElement?.className).toBe('game-instructions');
+  for (const text of [
+    'Red pirates and alien formations are hostile.',
+    'Blue police and green traders are allies. Unless you shoot them, at which point you are hostile, wanted, and hunted.'
+  ]) expect(within(instructions).queryByText(text)).toBeNull();
+  expect(instructions.querySelector('.mission-briefing, p[class]')).toBeNull();
+});
+it('groups five linked tabs above the shared panels with roving keyboard focus', async () => {
+  shell.show(...FrontMenus.title(freshProfile(), 'invaders', 'pulse', false));
+  const nav = screen.getByRole('tablist', { name: 'Game information' });
+  expect(within(nav).getAllByRole('tab').map(item => item.textContent)).toEqual(['GAME', 'INSTRUCTIONS', 'CONTROLS', 'HIGH SCORES', 'INFO DECK']);
+  expect(nav.nextElementSibling?.classList.contains('title-panels')).toBe(true);
+  within(nav).getByRole('tab', { name: 'GAME' }).focus();
+  await user.keyboard('{ArrowRight}'); expect(action).toHaveBeenCalledExactlyOnceWith('instructions');
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'INSTRUCTIONS', selected: true }));
+  expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+  await user.keyboard('{End}{ArrowRight}{ArrowLeft}{Home}');
+  expect(action.mock.calls.map(([name]) => name)).toEqual(['instructions', 'objects', 'game', 'objects', 'game']);
+  expect(browse).not.toHaveBeenCalled();
+  for (const tab of within(nav).getAllByRole('tab')) {
+    expect(document.getElementById(tab.getAttribute('aria-controls')!)?.getAttribute('aria-labelledby')).toBe(tab.id);
+    expect(tab.tabIndex).toBe(tab.getAttribute('aria-selected') === 'true' ? 0 : -1);
+  }
+});
 
 it('does not browse objects from unrelated menus or after returning to flight', async () => {
   shell.show(...FrontMenus.title(freshProfile(), 'journey', 'pulse', false));
   await user.keyboard('{ArrowRight}{ArrowLeft}'); expect(browse).not.toHaveBeenCalled();
-  shell.show(...FrontMenus.objects()); shell.hide();
+  shell.show(...FrontMenus.title(freshProfile(), 'journey', 'pulse', false, 'objects')); shell.hide();
   await user.keyboard('{ArrowRight}{ArrowLeft}'); expect(browse).not.toHaveBeenCalled();
   expect(shell.overlay.hidden).toBe(true);
   expect(document.querySelector<HTMLElement>('.flight-buttons')!.inert).toBe(false);
   await user.click(screen.getByRole('button', { name: 'Pause' }));
   expect(action).toHaveBeenCalledExactlyOnceWith('pause');
+});
+
+it('allows keyboard focus and native page scrolling from help without launching hidden GAME actions', async () => {
+  shell.show(...FrontMenus.title(freshProfile(), 'journey', 'pulse', false, 'instructions'));
+  screen.getByRole('tab', { name: 'INSTRUCTIONS' }).focus(); await user.tab();
+  const panel = screen.getByRole('tabpanel', { name: 'INSTRUCTIONS' });
+  expect(document.activeElement).toBe(panel);
+  for (const code of ['ArrowDown', 'PageDown', 'Space']) {
+    const event = new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true });
+    panel.dispatchEvent(event); expect(event.defaultPrevented).toBe(false);
+  }
+  document.querySelector<HTMLButtonElement>('[data-action="newRun"]')!.click();
+  expect(action).not.toHaveBeenCalled();
 });
 
 it.each([0, 1000, 20000, 123456])('shows final score %s and a usable Continue choice', async score => {
@@ -238,7 +306,7 @@ it.each(GAME_MODES)('Game Over shows only the %s high scores, using the same tab
     for (const entry of profile.scoreboards[other]) expect(!!within(table).queryByText(String(entry.score))).toBe(other === mode);
   }
   const html = table.outerHTML;
-  shell.show(...FrontMenus.scores(profile, mode));
+  shell.show(...FrontMenus.title(profile, mode, 'pulse', false, 'scores'));
   expect(screen.getByRole('table').outerHTML).toBe(html); expect(profile).toEqual(before);
 });
 
@@ -246,6 +314,74 @@ it('Game Over has an empty high-score table when no flights qualify', () => {
   shell.show(...MenuViews.gameOver(newRun('invaders', 1), freshProfile()));
   expect(within(screen.getByRole('table')).getByText('NO FLIGHTS RECORDED YET')).toBeTruthy();
   expect(screen.queryByRole('textbox')).toBeNull();
+});
+
+it('focuses qualifying initials, validates them, submits once and displays the saved name', async () => {
+  const profile = freshProfile(), run = newRun('invaders', 1);
+  run.phase = 'gameover'; run.pilot.score = 12345; recordRun(profile, run);
+  shell.show(...MenuViews.gameOver(run, profile));
+  const field = screen.getByRole<HTMLInputElement>('textbox', { name: 'YOUR INITIALS' });
+  expect(document.activeElement).toBe(field);
+  const form = screen.getByRole<HTMLFormElement>('form', { name: 'High score initials' });
+  // Explicit submission also exercises validation for non-native submit callers.
+  form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
+  expect(action).not.toHaveBeenCalled();
+  await user.type(field, '123'); await user.click(screen.getByRole('button', { name: 'SAVE' }));
+  expect(action).not.toHaveBeenCalled();
+  await user.clear(field); await user.type(field, 'ace');
+  action.mockImplementation(name => {
+    if (name === 'saveInitials') nameScore(profile, run, field.value);
+    shell.show(...MenuViews.gameOver(run, profile));
+  });
+  await user.click(screen.getByRole('button', { name: 'SAVE' }));
+  expect(action).toHaveBeenCalledExactlyOnceWith('saveInitials');
+  expect(screen.getByRole('status').textContent).toBe('HIGH SCORE SAVED: ACE');
+  expect(within(screen.getByRole('table')).getByText('ACE')).toBeTruthy();
+  expect(screen.queryByRole('textbox')).toBeNull();
+});
+
+it('ignores unrelated submission events and suppresses forms while the overlay is hidden', () => {
+  shell.show('form', 'FORM', '', '<form aria-label="Unmanaged"></form><form aria-label="Managed" data-submit-action="save"></form>');
+  for (const target of [shell.overlay, screen.getByRole('form', { name: 'Unmanaged' })]) {
+    const event = new SubmitEvent('submit', { bubbles: true, cancelable: true });
+    target.dispatchEvent(event); expect(event.defaultPrevented).toBe(false);
+  }
+  const managed = screen.getByRole('form', { name: 'Managed' });
+  shell.hide();
+  const event = new SubmitEvent('submit', { bubbles: true, cancelable: true });
+  managed.dispatchEvent(event); expect(event.defaultPrevented).toBe(true);
+  expect(action).not.toHaveBeenCalled();
+});
+
+it('moves focus out of hidden tab content and leaves paused-flight screens unchanged', () => {
+  shell.show(...FrontMenus.title(freshProfile(), 'journey', 'pulse', false, 'objects'));
+  screen.getByRole('button', { name: 'Next object' }).focus();
+  shell.selectTitleTab('scores');
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'HIGH SCORES' }));
+  shell.show('pause', 'PAUSED', '', button('resume', 'RESUME'));
+  shell.selectTitleTab('controls'); expect(shell.titleTab).toBe('scores');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'RESUME' }));
+});
+
+it('arrow selection recovers absent focus and empty menus safely', async () => {
+  shell.show('pause', 'PAUSED', '', button('first', 'FIRST') + button('last', 'LAST'));
+  screen.getByRole<HTMLButtonElement>('button', { name: 'FIRST' }).blur();
+  await user.keyboard('{ArrowUp}'); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'LAST' }));
+  screen.getByRole<HTMLButtonElement>('button', { name: 'LAST' }).blur();
+  await user.keyboard('{ArrowDown}'); expect(document.activeElement).toBe(screen.getByRole('button', { name: 'FIRST' }));
+  shell.show('empty', 'EMPTY', '', '');
+  await user.keyboard('{ArrowUp}{ArrowDown}{Enter}'); expect(action).not.toHaveBeenCalled();
+});
+
+it('repeat, modified and composing keys do not activate exits or menu items', () => {
+  shell.show('gameover', 'GAME OVER', '', button('title', 'TITLE SCREEN'));
+  for (const options of [{ repeat: true }, { altKey: true }, { metaKey: true }, { isComposing: true }]) {
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', ...options }));
+  }
+  expect(action).not.toHaveBeenCalled();
+  shell.show('gameover', 'GAME OVER', '', '');
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape' }));
+  expect(action).not.toHaveBeenCalled();
 });
 
 it('excludes hidden, CSS-hidden, inert and disabled elements from focus wrapping', async () => {
@@ -261,7 +397,7 @@ it('excludes hidden, CSS-hidden, inert and disabled elements from focus wrapping
 it('handles empty views, missing text and disposal without leaving navigation listeners', async () => {
   shell.show('empty', 'EMPTY', '', ''); await user.tab();
   shell.text('notPresent', 'ignored'); shell.text('launchTitle', 'EMPTY');
-  shell.show(...FrontMenus.objects()); shell.dispose();
-  await user.keyboard('{ArrowRight}'); await user.click(screen.getByRole('button', { name: 'BACK' }));
+  shell.show(...FrontMenus.title(freshProfile(), 'journey', 'pulse', false, 'objects')); shell.dispose();
+  await user.keyboard('{ArrowRight}'); await user.click(screen.getByRole('tab', { name: 'GAME' }));
   expect(browse).not.toHaveBeenCalled(); expect(action).not.toHaveBeenCalled();
 });

@@ -2,6 +2,17 @@ import { PNG } from 'pngjs';
 import { test, expect } from './fixtures/game';
 import { freshProfile, SAVE_V2 } from '../../src/arcade';
 
+function movingBackgroundPixels(before: Buffer, after: Buffer): number {
+  const a = PNG.sync.read(before), b = PNG.sync.read(after);
+  let changed = 0;
+  for (let i = 0; i < a.data.length; i += 4) {
+    const [r, g, blue] = b.data.subarray(i, i + 3);
+    // Red/pink aliens and coloured rocks, not blinking yellow menu controls.
+    if ((r > 70 && r > g * 1.4 || blue > 70 && blue > r * 1.3) && Math.abs(r - a.data[i]) + Math.abs(g - a.data[i + 1]) + Math.abs(blue - a.data[i + 2]) > 40) changed++;
+  }
+  return changed;
+}
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test(`flashing blue respawn craft and HUD fit ${viewport.width}px`, async ({ game, page }) => {
     const profile = freshProfile();
@@ -24,7 +35,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(box!.y).toBeGreaterThanOrEqual(cluster!.y);
       expect(box!.y + box!.height).toBeLessThanOrEqual(cluster!.y + cluster!.height);
     }
-    await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath()); await game.step(0.02); await page.clock.runFor(20);
+    await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath()); await game.step(0.2);
+    await expect(page.locator('#lifeLostHeading')).toHaveText('SHIP DESTROYED');
+    await expect(page.locator('#lifeLostLives')).toHaveText('2 LIVES LEFT');
+    await expect(page.locator('#lifeLost')).toBeVisible();
+    await page.screenshot({ path: game.info.outputPath('ship-destroyed.png') });
+    await game.step(3.8); await page.clock.runFor(20);
+    await expect(page.locator('#lifeLost')).toBeHidden();
     await game.layout();
     const pixels = PNG.sync.read(await game.screenshot('blue-respawn-craft'));
     let blue = 0;
@@ -45,10 +62,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     expect(normalBlue).toBeLessThan(blue);
     await page.evaluate(() => window.vectorShooterDebug.giveScore(123456));
     const lives = (await game.state()).lives!;
-    for (let i = 0; i < lives; i++) { await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath()); await game.step(0.02); }
+    for (let i = 0; i < lives; i++) { await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath()); await game.step(i < lives - 1 ? 4 : 0); }
     await expect(page.locator('#finalScore')).toHaveText('123,456');
     await expect(page.getByRole('textbox', { name: 'YOUR INITIALS' })).toBeVisible();
-    const table = page.getByRole('table', { name: 'INVADERS high scores' });
+    const table = page.getByRole('table', { name: 'DEFENSIVE POSITION high scores' });
     await expect(table.locator('tbody tr')).toHaveCount(10);
     const actions = await page.locator('.gameover-actions button').evaluateAll(items => items.map(item => {
       const bounds = item.getBoundingClientRect();
@@ -65,10 +82,25 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.clock.runFor(50);
     await expect(page.locator('#launchOverlay')).toHaveAttribute('data-mode', 'gameover');
     await expect(page.locator('[data-action="relaunch"]')).toBeEnabled();
+    await expect(page.locator('.hud')).toBeHidden();
+    const still = await page.screenshot(); await page.clock.runFor(650);
+    const moving = await page.screenshot({ path: game.info.outputPath('gameover-moving-aliens.png') });
+    expect(movingBackgroundPixels(still, moving), 'surviving aliens move visibly behind the game-over text').toBeGreaterThan(12);
+
+    // Render the same screen with surviving rocks, without playing an asteroid field.
+    await game.action('relaunch');
+    await page.evaluate(() => window.vectorShooterDebug.setStage(6)); await game.step(4.2);
+    expect((await game.state()).actors.some(actor => actor.kind === 'asteroid')).toBe(true);
+    const remaining = (await game.state()).lives!;
+    for (let i = 0; i < remaining; i++) { await page.evaluate(() => window.vectorShooterDebug.forcePlayerDeath()); await game.step(i < remaining - 1 ? 4 : 0); }
+    const rocks = await page.screenshot(); await page.clock.runFor(650);
+    const drifting = await page.screenshot({ path: game.info.outputPath('gameover-moving-asteroids.png') });
+    expect(movingBackgroundPixels(rocks, drifting), 'surviving rocks drift visibly behind the game-over text').toBeGreaterThan(12);
+    await game.layout();
   });
 }
 
-test('Invaders charged-blast status fits beside score at intermediate and narrow sizes', async ({ game, page }) => {
+test('Defensive Position charged-blast status fits beside score at intermediate and narrow sizes', async ({ game, page }) => {
   await game.open(); await game.start('invaders');
   await page.evaluate(() => window.vectorShooterDebug.primeBlast()); await game.step(0);
   for (const viewport of [{ width: 1024, height: 768 }, { width: 844, height: 390 }, { width: 320, height: 640 }]) {

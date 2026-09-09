@@ -25,6 +25,8 @@ import { crossedGate, Random } from './encounters';
 import { ASTEROID_COLORS, createBoltModel, createCargoModel, createPulseRing, createTextSprite, disposeObject, edgesFromGeometry, lineShape } from './models';
 import { sweptHit, weaponSpec } from './weapons';
 import { SoundEvents } from './audio/events';
+import { asteroidChild, MAX_ASTEROID_FRAGMENTS, ASTEROID_FRAGMENT_GRACE } from './asteroid-fragments';
+export { MAX_ASTEROID_FRAGMENTS, ASTEROID_FRAGMENT_GRACE } from './asteroid-fragments';
 
 export interface BonusRunState {
   kind: BonusKind;
@@ -54,8 +56,6 @@ export interface BonusRunState {
 interface AsteroidMotion { size: 0 | 1 | 2; color: number; velocity: THREE.Vector3; previous: THREE.Vector3; age: number; grace: number; spin: number }
 interface MarkerMotion { home: THREE.Vector3; phase: number; direction: number; amplitude: THREE.Vector2 }
 interface BonusObject { kind: 'rock' | 'salvage' | 'gate' | 'marker' | 'turret' | 'obstacle' | 'hostileBolt' | 'pirate' | 'police'; object: THREE.Object3D; radius: number; number: number; used: boolean; rock?: AsteroidMotion; marker?: MarkerMotion }
-export const MAX_ASTEROID_FRAGMENTS = 64;
-export const ASTEROID_FRAGMENT_GRACE = 0.45;
 export const ASTEROID_DURATION = 60;
 export const ASTEROID_LENGTH = 4800;
 export const CANYON_SHOT_MISS_COST = 50;
@@ -217,9 +217,10 @@ export class BonusController {
     // collision grace, and a hard cap prevents a splitting chain overwhelming WebGL.
     this.consume(item);
     const rock = item.rock;
-    if (!rock || rock.size === 0) return;
+    const child = rock && asteroidChild(rock.size, item.radius);
+    if (!rock || !child) return;
     if (this.objects.filter(other => !other.used && other.rock && other.rock.size < 2).length + 2 > MAX_ASTEROID_FRAGMENTS) return;
-    const size = (rock.size - 1) as 0 | 1, radius = item.radius * 0.57;
+    const { size, radius } = child;
     const angle = this.rng.range(0, Math.PI * 2), spread = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
     const speed = (size === 1 ? 11 : 18) * this.profile.motionScale;
     for (const side of [-1, 1]) {

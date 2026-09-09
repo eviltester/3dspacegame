@@ -1,4 +1,4 @@
-/** Shared defensive-lane geometry for Journey armadas and the Invaders mode. */
+/** Shared defensive-lane geometry for Journey armadas and the Defensive Position mode. */
 import * as THREE from 'three';
 
 export const ARMADA_LANE_LIMIT = 76;

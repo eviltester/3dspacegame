@@ -5,7 +5,7 @@ import { PNG } from 'pngjs';
 test.use({ trace: { mode: 'retain-on-failure', screenshots: false, snapshots: false, sources: true } });
 
 for (const width of [1440, 390]) {
-  test(`live title previews, weapon help and separate score screens fit ${width}px`, async ({ game, page }) => {
+  test(`live title previews, weapon help and score panels fit ${width}px`, async ({ game, page }) => {
     await page.setViewportSize({ width, height: width > 650 ? 900 : 844 });
     await game.open();
     const saved = await page.evaluate(() => localStorage.getItem('vector-shooter-save-v2'));
@@ -13,12 +13,14 @@ for (const width of [1440, 390]) {
       await game.action(`mode:${mode}`); await game.layout();
       await expect(page.locator('#modePreviewName')).toHaveText(MODE_INFO[mode].name);
       await expect(page.locator('.title-modes > .briefing-status')).toHaveText('GAME MODES');
-      const tools = page.locator('.title-tools button');
-      await expect(tools).toHaveText(['CONTROLS', 'HIGH SCORES', 'INFO DECK']);
+      const tools = page.getByRole('tab');
+      await expect(tools).toHaveText(['GAME', 'INSTRUCTIONS', 'CONTROLS', 'HIGH SCORES', 'INFO DECK']);
       const rows = await tools.evaluateAll(items => items.map(item => item.getBoundingClientRect().top));
       expect(Math.max(...rows) - Math.min(...rows), 'pilot menu choices share one line').toBeLessThan(2);
       const description = (await page.locator('#weaponHelp').boundingBox())!;
       const demo = (await page.locator('#modeDemo').boundingBox())!;
+      const tabs = (await page.locator('.information-tabs').boundingBox())!;
+      expect(tabs.y + tabs.height).toBeLessThanOrEqual(demo.y);
       expect(demo.width).toBeLessThanOrEqual(320);
       expect(demo.height).toBe(120);
       const canvasAspect = await page.locator('#modeDemo canvas').evaluate((canvas: HTMLCanvasElement) => canvas.width / canvas.height);
@@ -33,11 +35,12 @@ for (const width of [1440, 390]) {
         const choices = (await page.locator('.title-modes').boundingBox())!;
         const weapons = (await page.locator('.title-loadout').boundingBox())!;
         expect(play.x).toBeGreaterThan(choices.x + choices.width);
-        expect(Math.abs(weapons.y - (await page.locator('#weaponPreviewCopy').boundingBox())!.y)).toBeLessThan(2);
+        expect(weapons.y).toBeGreaterThanOrEqual(demo.y + demo.height);
+        expect(weapons.y + weapons.height).toBeLessThanOrEqual(description.y);
       }
       await expect(page.locator('#launchOverlay')).not.toContainText('ATTRACT MODE');
       await expect(page.locator('#launchOverlay')).not.toContainText('LIVE DEMO');
-      await expect(page.locator('.controls-card')).toHaveCount(0);
+      await expect(page.locator('.controls-card')).toBeHidden();
       await page.clock.runFor(300);
       const first = await game.screenshot(`${mode}-preview-${width}`, '#modeDemo canvas');
       await page.clock.runFor(700);
@@ -55,7 +58,7 @@ for (const width of [1440, 390]) {
     }
     expect(await page.evaluate(() => localStorage.getItem('vector-shooter-save-v2'))).toBe(saved);
     // Include both Resume and New Run, not only a fresh profile's Play button.
-    await game.action('newRun'); await game.action('title'); await game.layout();
+    await game.engage('newRun'); await game.pause(); await game.action('title'); await game.layout();
     const playRows = await page.locator('.title-play-buttons button').evaluateAll(items => items.map(item => item.getBoundingClientRect().top));
     expect(playRows).toHaveLength(2);
     expect(Math.max(...playRows) - Math.min(...playRows), 'play options share one line').toBeLessThan(2);
@@ -67,18 +70,16 @@ for (const width of [1440, 390]) {
       await page.screenshot({ path: game.info.outputPath('compact-title-720.png') });
       await page.setViewportSize({ width, height: 900 });
     }
-    await game.action('weapons'); await game.layout();
-    for (const family of ['PULSE', 'SPREAD', 'LANCE']) await expect(page.locator('.weapon-guide')).toContainText(family);
-    await expect(page.locator('.weapon-guide')).toContainText('pierc');
-    await game.action('title'); await game.action('scores');
+    await expect(page.locator('.family-select button')).toHaveText(['PULSE', 'SPREAD', 'LANCE']);
+    await game.action('scores');
     for (const mode of GAME_MODES) {
-      await game.action(`scores:${mode}`); await game.layout();
+      await game.action(`mode:${mode}`); await game.layout();
       await expect(page.locator('.score-table')).toContainText('NO FLIGHTS RECORDED YET');
       await game.screenshot(`${mode}-scores-${width}`, '.arcade-menu');
     }
-    await game.action('title'); await game.unlockWarp();
+    await game.action('game'); await game.unlockWarp();
     for (const mode of ['invaders', 'smuggler'] as const) {
-      await game.warpStage(mode === 'invaders' ? 1000 : 16, mode); await game.layout(); await game.engage();
+      await game.warpStage(mode === 'invaders' ? 1000 : 16, mode); await game.layout();
       await game.step(0.4); await game.layout();
       await page.screenshot({ path: game.info.outputPath(`${mode}-flight-${width}.png`) });
       await game.screenshot(`${mode}-flight-${width}`);

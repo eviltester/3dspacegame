@@ -6,7 +6,7 @@ for (const width of [1440, 390]) test(`tunnel vectors, open/closed framing and l
   await page.screenshot({ path: game.info.outputPath(`tunnels-title-${width}.png`) });
   await game.unlockWarp();
   for (const level of [1,7,1000]) {
-    await game.warpStage(level, 'tunnels'); await game.engage('launch', false);
+    await game.warpStage(level, 'tunnels');
     await game.step(2); await game.mouse(true); await game.step(0.15);
     const a = await game.screenshot(`tunnel-${level}-${width}`); await game.step(0.2);
     const b = await game.screenshot(`tunnel-moving-${level}-${width}`);

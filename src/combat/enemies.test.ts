@@ -9,6 +9,9 @@ import { actorFixture } from '../testing/actors';
 import { EnemySystem } from './enemies';
 import type { EnemyFrame, EnemyServices } from './enemies';
 import type { Actor } from './types';
+import { invaderDistance, INVADER_CLEARANCE } from '../invader-formation';
+import { invaderHome } from '../invader-patterns';
+import { invaderSpreadLimit } from '../invaders';
 
 function fixture(wave = 1, mode: GameMode = 'endless') {
   const actors: Actor[] = [];
@@ -25,7 +28,7 @@ function fixture(wave = 1, mode: GameMode = 'endless') {
       const actor = add({ kind, object, radius, hull, role: role ?? 'raider' }, position.x, position.z); return actor;
     }), removeActor: vi.fn<EnemyServices['removeActor']>(actor => { actor.dead = true; }), destroy: vi.fn<EnemyServices['destroy']>(actor => { actor.dead = true; }),
     damagePlayer: vi.fn<EnemyServices['damagePlayer']>(), announceArrival: vi.fn<EnemyServices['announceArrival']>(),
-    spawnShot: vi.fn<EnemyServices['spawnShot']>(), enemyShoot: vi.fn<EnemyServices['enemyShoot']>(), lockOn: vi.fn(), stopped: () => false
+    spawnShot: vi.fn<EnemyServices['spawnShot']>(), enemyShoot: vi.fn<EnemyServices['enemyShoot']>(), cue: vi.fn(), lockOn: vi.fn(), stopped: () => false
   } satisfies EnemyServices;
   const system = new EnemySystem(services);
   const tick = (seconds = 1 / 60) => { for (let t = 0; t < seconds; t += 1 / 60) { frame.run.elapsed += 1 / 60; system.update(1 / 60, frame); } };
@@ -118,11 +121,61 @@ describe('NPC salvage', () => {
   });
 });
 
-describe('Invaders attack scheduling', () => {
+describe('Defensive Position attack scheduling', () => {
+  it.each([1, 13, 19, 25, 43, 1000])('wave %i equips only its limited spread slots, not the whole fleet', wave => {
+    const f = fixture(wave, 'invaders');
+    const aliens = Array.from({ length: 18 }, (_, slot) => f.add({
+      formationSlot: slot, role: (['raider', 'flanker', 'diver'] as const)[slot % 3], age: 2, windup: 0.001
+    }, slot * 2));
+    // Complete already-warned volleys together to inspect each weapon. Separate
+    // scheduler tests verify these windups are staggered during normal gameplay.
+    f.tick();
+    const counts = aliens.map(actor => f.services.spawnShot.mock.calls.filter(call => call[1] === actor.id).length);
+    expect(counts.filter(count => count === 3)).toHaveLength(invaderSpreadLimit(wave));
+    expect(counts.filter(count => count === 1)).toHaveLength(18 - invaderSpreadLimit(wave));
+  });
+  it('keeps a spread-equipped alien on single-shot cover fire', () => {
+    const f = fixture(13, 'invaders');
+    f.add({ formationSlot: 0, age: 2, windup: 0.001, coverFire: true });
+    f.tick(); expect(f.services.spawnShot).toHaveBeenCalledOnce();
+  });
+  it('does not promote survivors after a spread alien dies; only a replacement reuses its slot', () => {
+    const f = fixture(13, 'invaders');
+    const spreader = f.add({ age: 2, windup: 0.001 }), survivor = f.add({ age: 2, windup: 0.001 }, 30);
+    f.tick(); expect(spreader.formationSlot).toBe(0); expect(survivor.formationSlot).toBe(1);
+    spreader.dead = true; survivor.windup = 0.001; f.services.spawnShot.mockClear();
+    f.tick(); expect(f.services.spawnShot).toHaveBeenCalledOnce(); expect(survivor.formationSlot).toBe(1);
+    const replacement = f.add({ age: 2, windup: 0.001 }); f.services.spawnShot.mockClear();
+    f.tick(); expect(replacement.formationSlot).toBe(0); expect(survivor.formationSlot).toBe(1);
+    expect(f.services.spawnShot.mock.calls.filter(call => call[1] === replacement.id)).toHaveLength(3);
+  });
+  it('moves the whole fleet before firing and preserves previous positions for swept hits', () => {
+    const { add, actors, frame, system, services } = fixture(4, 'invaders');
+    for (let slot = 0; slot < 18; slot++) {
+      const position = invaderHome(slot);
+      add({ formationSlot: slot, age: 2, windup: slot === 0 ? 0.001 : -1 }, position.x, position.z);
+    }
+    const before = actors.map(actor => actor.object.position.clone());
+    frame.run.elapsed = 4;
+    services.spawnShot.mockImplementation((_faction, source, _target, position, direction) => {
+      const actor = actors.find(actor => actor.id === source)!;
+      expect(position.clone().addScaledVector(direction, -actor.radius - 5)).toEqual(actor.object.position);
+      expect(actors.every(actor => !actor.object.position.equals(before[actors.indexOf(actor)]))).toBe(true);
+    });
+    system.update(1 / 60, frame);
+    expect(services.spawnShot).toHaveBeenCalled();
+    expect(actors.map(actor => actor.previous)).toEqual(before);
+    for (let i = 0; i < actors.length; i++) for (let j = i + 1; j < actors.length; j++) {
+      expect(invaderDistance(actors[i].object.position, actors[j].object.position)).toBeGreaterThanOrEqual(INVADER_CLEARANCE - 0.01);
+    }
+  });
   function simulate(wave: number, count: number) {
     const f = fixture(wave, 'invaders');
-    const shots: Array<{ source: number; time: number }> = [];
-    f.services.spawnShot.mockImplementation((_faction, source) => { shots.push({ source, time: f.frame.run.elapsed }); });
+    const shots: Array<{ source: number; time: number; cover: boolean }> = [];
+    f.services.spawnShot.mockImplementation((_faction, source) => {
+      const actor = f.actors.find(item => item.id === source)!;
+      if (!actor.flyby) shots.push({ source, time: f.frame.run.elapsed, cover: !!actor.coverFire });
+    });
     for (let i = 0; i < count; i++) f.add({ cooldown: 1.1 + i * 0.25 }, (i % 6 - 2.5) * 22, -165 - Math.floor(i / 6) * 60);
     let warned = 0;
     for (let tick = 0; tick < 1800; tick++) {
@@ -130,7 +183,7 @@ describe('Invaders attack scheduling', () => {
     }
     return { ...f, shots, warned };
   }
-  it.each([1, 12, 1000])('staggered wave %i never fires two aliens together and gives each one a recovery', wave => {
+  it.each([1, 12, 1000])('wave %i adds cover pairs while staggering aimed shots and preserving individual recovery', wave => {
     const { shots, warned, frame } = simulate(wave, 18);
     const turns = shots.filter((shot, i) => i === 0 || shot.source !== shots[i - 1].source || shot.time !== shots[i - 1].time);
     const timing = invaderFireTiming(wave);
@@ -140,13 +193,34 @@ describe('Invaders attack scheduling', () => {
     const last = new Map<number, number>();
     for (let i = 0; i < turns.length; i++) {
       const shot = turns[i];
-      if (i) expect(shot.time - turns[i - 1].time).toBeGreaterThanOrEqual(timing.gap - 1 / 60);
       if (last.has(shot.source)) expect(shot.time - last.get(shot.source)!).toBeGreaterThanOrEqual(timing.cooldown + ENEMY_ATTACK_WARNING - 1 / 60);
       last.set(shot.source, shot.time);
     }
     expect(last.size).toBeGreaterThanOrEqual(8);
+    expect(turns.some(shot => shot.cover)).toBe(true);
+    const aimed = turns.filter(shot => !shot.cover);
+    for (let i = 1; i < aimed.length; i++) expect(aimed[i].time - aimed[i - 1].time).toBeGreaterThanOrEqual(timing.gap - 1 / 60);
   });
   it('increases actual fire with wave progression without synchronizing the formation', () => {
     expect(simulate(12, 8).shots.length).toBeGreaterThan(simulate(1, 8).shots.length);
+  });
+  it('increases each surviving alien firing frequency as the fleet shrinks', () => {
+    const fleet = simulate(1, 18), survivors = simulate(1, 3);
+    expect(survivors.shots.length / 3).toBeGreaterThan(fleet.shots.length / 18);
+  });
+  it.each([-76, 0, 76])('extra cover fire avoids player x=%i even if the shooter is a gunship', x => {
+    const f = fixture(1, 'invaders'); f.frame.position.x = x;
+    const actor = f.add({ age: 2, role: 'gunship', windup: 0.05, coverFire: true });
+    f.tick(0.06);
+    const shots = f.services.spawnShot.mock.calls.filter(call => call[1] === actor.id);
+    expect(shots).toHaveLength(1);
+    for (const [, , target, position, direction] of shots) {
+      const crossingX = position.x + direction.x * (-position.z / direction.z);
+      expect(Math.abs(crossingX - x)).toBeGreaterThanOrEqual(28 - 1e-6); expect(target).toBe(0);
+    }
+  });
+  it('shortens a surviving alien cooldown already in progress after casualties', () => {
+    const f = fixture(1, 'invaders'), actor = f.add({ age: 2, cooldown: 5.6 });
+    f.tick(); expect(actor.cooldown).toBeCloseTo(invaderFireTiming(1, 1).cooldown);
   });
 });

@@ -10,6 +10,8 @@ import { createArmadaRig, createBaseModel, createPlanetModel, createBlackMarketM
 import type { Actor, ActorKind } from '../combat/types';
 import { createInvaderModel } from '../models/ships';
 import { shipVoice, invaderVoice } from '../audio/events';
+import { INVADER_SLOTS } from '../invader-patterns';
+import { invaderEntryPosition } from '../invader-formation';
 
 interface SpawnFrame { run: RunState; definition: StageDefinition; position: THREE.Vector3; orientation: THREE.Quaternion; rng: Random }
 
@@ -31,7 +33,7 @@ export class ActorWorld {
   }
   add(kind: ActorKind, object: THREE.Object3D, position: THREE.Vector3, radius: number, hull: number, role: EnemyArchetype = 'raider'): Actor {
     object.position.copy(position); this.world.add(object);
-    const actor: Actor = { id: this.allocateId(), kind, faction: kind === 'pirate' || kind === 'part' || kind === 'mine' ? 'pirate' : kind === 'police' ? 'police' : kind === 'trader' ? 'trader' : 'neutral',
+    const actor: Actor = { id: this.allocateId(), kind, faction: kind === 'pirate' || kind === 'part' || kind === 'mine' || kind === 'asteroid' ? 'pirate' : kind === 'police' ? 'police' : kind === 'trader' ? 'trader' : 'neutral',
       object, previous: position.clone(), radius, hull, maxHull: hull, role, firingVoice: shipVoice(kind, role), age: 0, cooldown: kind === 'pirate' ? 1.1 : 2, windup: -1, target: 0,
       anchor: position.clone(), offset: new THREE.Vector3(), parent: null, essential: false, drop: null, dead: false, spawned: 0, drift: null };
     this.active.push(actor); return actor;
@@ -81,10 +83,14 @@ export class ActorWorld {
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(orientation);
     roles.forEach((role, index) => {
       const armada = definition.kind === 'armada';
-      const position = armada ? armadaFormationPosition(index, roles.length)
+      const invaders = run.mode === 'invaders' ? this.active.filter(actor => actor.kind === 'pirate' && !actor.flyby && !actor.dead) : [];
+      const slot = Array.from({ length: INVADER_SLOTS }, (_, i) => i).find(i => !invaders.some(actor => actor.formationSlot === i));
+      if (run.mode === 'invaders' && (slot === undefined || this.active.filter(actor => !actor.dead && (actor.kind === 'pirate' || actor.kind === 'mine')).length >= INVADER_SLOTS)) return;
+      const position = run.mode === 'invaders' ? invaderEntryPosition(slot!, invaders.map(actor => actor.object.position))
+        : armada ? armadaFormationPosition(index, roles.length)
         : origin.clone().addScaledVector(forward, role === 'carrier' ? 260 : 185 + rng.range(0, 60))
           .addScaledVector(right, (index - (roles.length - 1) / 2) * 27);
-      if (!armada) position.y += rng.range(-16, 20);
+      if (!armada && run.mode !== 'invaders') position.y += rng.range(-16, 20);
       if (run.mode === 'endless' && !armada && position.length() > 440) {
         // Fit the compact arena without clamping a new enemy onto the player.
         position.setLength(440);
@@ -92,7 +98,7 @@ export class ActorWorld {
       }
       if (definition.kind === 'ambush' && run.elapsed > 5) position.sub(origin).applyAxisAngle(new THREE.Vector3(0, 1, 0), index % 2 ? 0.75 : -0.75).add(origin);
       const actor = this.add('pirate', run.mode === 'invaders' ? createInvaderModel(role) : createEnemyModel(role), position, role === 'carrier' ? 23 : role === 'gunship' ? 10 : 8, HULL[role], role);
-      if (run.mode === 'invaders') actor.firingVoice = invaderVoice(role);
+      if (run.mode === 'invaders') { actor.firingVoice = invaderVoice(role); actor.formationSlot = slot; }
       arrivals.push(actor);
       actor.cooldown += index * 0.25;
       if (role === 'carrier' && definition.kind === 'boss') {
